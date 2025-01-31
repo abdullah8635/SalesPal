@@ -12,8 +12,8 @@ import string
 import random
 import os
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-import psycopg2
-from psycopg2 import pool
+import mysql.connector
+from flask_mysqldb import MySQL
 import io
 from werkzeug.utils import secure_filename
 from functools import wraps
@@ -25,10 +25,10 @@ app.permanent_session_lifetime = timedelta(minutes=60)
 app.config['SESSION_COOKIE_SECURE'] = True  # For HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['DB_HOST'] = os.environ.get('POSTGRES_HOST')
-app.config['DB_NAME'] = os.environ.get('POSTGRES_DATABASE')
-app.config['DB_USER'] = os.environ.get('POSTGRES_USER')
-app.config['DB_PASSWORD'] = os.environ.get('POSTGRES_PASSWORD')
+app.config['MYSQL_HOST'] = 'localhost'  # You'll change this to your AWS RDS endpoint
+app.config['MYSQL_USER'] = 'root'
+app.config['MYSQL_PASSWORD'] = ''
+app.config['MYSQL_DB'] = 'smtc_tracker'
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 
@@ -113,7 +113,7 @@ def update_db():
     # Create the users table
     db.execute('''
         CREATE TABLE IF NOT EXISTS users(
-            id SERIAL PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT
             name TEXT UNIQUE NOT NULL,
             email TEXT UNIQUE NOT NULL,
             phone TEXT UNIQUE NOT NULL,
@@ -128,7 +128,7 @@ def update_db():
     # Create the parsed_receipts_new table
     db.execute('''
         CREATE TABLE IF NOT EXISTS parsed_receipts (
-            id SERIAL PRIMARY KEY,
+            id INTEGER PRIMARY KEY AUTOINCREMENT
             company_name TEXT,
             customer TEXT,
             order_date TEXT,
