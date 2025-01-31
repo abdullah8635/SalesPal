@@ -29,4 +29,10 @@ node_modules/
 
 # Testing frameworks
 venv/
+<<<<<<< HEAD
 .tox/
+=======
+.tox/
+
+instance/*.db
+>>>>>>> a4246aef97e333eabd53cab9a685c7fd21f5fe9d
