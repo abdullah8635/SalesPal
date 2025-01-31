@@ -69,8 +69,7 @@ def load_user(user_id):
             is_admin=user[2]
         )
     return None
-
-mysql = MySQL(app)
+    
 bcrypt = Bcrypt(app)
 limiter = Limiter(
     app=app,
