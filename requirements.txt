@@ -18,7 +18,6 @@ ordered-set==4.1.0
 packaging==24.1
 Pygments==2.18.0
 PyPDF2==3.0.1
-psycopg2-binary==2.9.9
 rich==13.9.2
 typing_extensions==4.12.2
 Werkzeug==3.0.4
