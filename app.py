@@ -9,11 +9,11 @@ import sqlite3
 import PyPDF2
 import math
 import string
-import mysql.connector
 import random
 import os
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-from flask_mysqldb import MySQL
+import psycopg2
+from psycopg2 import pool
 import io
 from werkzeug.utils import secure_filename
 from functools import wraps
@@ -25,10 +25,10 @@ app.permanent_session_lifetime = timedelta(minutes=60)
 app.config['SESSION_COOKIE_SECURE'] = True  # For HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['MYSQL_HOST'] = 'localhost'
-app.config['MYSQL_USER'] = 'root'
-app.config['MYSQL_PASSWORD'] = ''
-app.config['MYSQL_DB'] = 'smtc_tracker'
+app.config['DB_HOST'] = os.environ.get('POSTGRES_HOST')
+app.config['DB_NAME'] = os.environ.get('POSTGRES_DATABASE')
+app.config['DB_USER'] = os.environ.get('POSTGRES_USER')
+app.config['DB_PASSWORD'] = os.environ.get('POSTGRES_PASSWORD')
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 
@@ -114,7 +114,7 @@ def update_db():
     # Create the users table
     db.execute('''
         CREATE TABLE IF NOT EXISTS users(
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             name TEXT UNIQUE NOT NULL,
             email TEXT UNIQUE NOT NULL,
             phone TEXT UNIQUE NOT NULL,
@@ -129,7 +129,7 @@ def update_db():
     # Create the parsed_receipts_new table
     db.execute('''
         CREATE TABLE IF NOT EXISTS parsed_receipts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            id SERIAL PRIMARY KEY,
             company_name TEXT,
             customer TEXT,
             order_date TEXT,
@@ -336,7 +336,12 @@ def round_up(value, decimals=2):
 # Database connection function
 def get_db():
     if 'db' not in g:
-        g.db = sqlite3.connect(DATABASE)
+        g.db = psycopg2.connect(
+            host=app.config['DB_HOST'],
+            database=app.config['DB_NAME'],
+            user=app.config['DB_USER'],
+            password=app.config['DB_PASSWORD']
+        )
     return g.db
 
 # Close the database connection at the end of each request
