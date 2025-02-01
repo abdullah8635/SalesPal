@@ -28,10 +28,10 @@ app.config['SESSION_COOKIE_SECURE'] = True  # For HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
-app.config['DB_HOST'] = os.environ.get('DB_HOST', 'localhost')
-app.config['DB_NAME'] = os.environ.get('DB_NAME', 'salespal')
-app.config['DB_USER'] = os.environ.get('DB_USER', 'yourusername')
-app.config['DB_PASSWORD'] = os.environ.get('DB_PASSWORD', 'yourpassword')
+app.config['DB_HOST'] = 'localhost'
+app.config['DB_NAME'] = 'salespal'
+app.config['DB_USER'] = 'yourusername'
+app.config['DB_PASSWORD'] = 'yourpassword'  # Make sure this is correct
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
@@ -82,20 +82,30 @@ DATABASE = '/data/users.db'
 os.makedirs('/home/ubuntu/SalesPal/data', exist_ok=True)  # Create the directory if it doesn't exist
 
 def get_db():
-    if 'db' not in g:
-        g.db = psycopg2.connect(
+    try:
+        print("Attempting to connect to database...")
+        connection = psycopg2.connect(
             host=app.config['DB_HOST'],
             database=app.config['DB_NAME'],
             user=app.config['DB_USER'],
             password=app.config['DB_PASSWORD']
         )
-    return g.db
+        print("Database connection successful")
+        return connection
+    except psycopg2.Error as e:
+        print(f"Database connection error: {e}")
+        print(f"Connection details:")
+        print(f"Host: {app.config['DB_HOST']}")
+        print(f"Database: {app.config['DB_NAME']}")
+        print(f"User: {app.config['DB_USER']}")
+        raise
 
 def init_db():
-    db = get_db()
-    cursor = db.cursor()
-    
+    db = None
     try:
+        db = get_db()
+        cursor = db.cursor()
+        
         # Explicitly set search path to public schema
         cursor.execute('SET search_path TO public')
 
@@ -136,29 +146,21 @@ def init_db():
             );
         ''')
 
-        # Check if admin user exists
-        cursor.execute("SELECT * FROM users WHERE username = 'admin'")
-        admin_exists = cursor.fetchone()
-
-        # Create default admin if it doesn't exist
-        if not admin_exists:
-            admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
-            cursor.execute('''
-                INSERT INTO users (name, email, phone, username, password, approved, is_admin)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
-
         # Commit all changes
         db.commit()
-        print("Database initialized successfully")
+        print("Database tables created successfully")
 
     except Exception as e:
-        # Rollback in case of any error
-        db.rollback()
-        print(f"Error in init_db: {e}")
+        print(f"Detailed error in init_db: {type(e).__name__}")
+        print(f"Error message: {e}")
+        if db:
+            db.rollback()
+        raise  # Re-raise to see full traceback
     finally:
-        # Always close the cursor
-        cursor.close()
+        if 'cursor' in locals():
+            cursor.close()
+        if db:
+            db.close()
         
 ALLOWED_EXTENSIONS = {'pdf'}
 def allowed_file(filename):
