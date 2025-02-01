@@ -83,100 +83,80 @@ os.makedirs('/home/ubuntu/SalesPal/data', exist_ok=True)  # Create the directory
 
 def init_db():
     db = get_db()
-    # Create a cursor
     cursor = db.cursor()
-
+    
     try:
-        # Use the cursor to execute the ALTER TABLE command
-        cursor.execute('ALTER TABLE parsed_receipts ADD COLUMN imei_iccid_pairs TEXT')
+        # Create users table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                name VARCHAR(255) UNIQUE NOT NULL,
+                email VARCHAR(255) UNIQUE NOT NULL,
+                phone VARCHAR(20) UNIQUE NOT NULL,
+                username VARCHAR(50) UNIQUE,
+                password TEXT,
+                approved INTEGER DEFAULT 0,
+                is_admin INTEGER DEFAULT 0,
+                rejected INTEGER DEFAULT 0
+            );
+        ''')
+
+        # Create parsed_receipts table
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS parsed_receipts (
+                id SERIAL PRIMARY KEY,
+                company_name TEXT,
+                customer TEXT,
+                order_date TEXT,
+                sales_person TEXT,
+                rq_invoice TEXT,
+                total_price REAL,
+                accessory_prices TEXT,
+                upgrades_count INTEGER,
+                activations_count INTEGER,
+                ppp_present BOOLEAN,
+                activation_fee_sum REAL,
+                user_id INTEGER,
+                date_submitted TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                imei_iccid_pairs TEXT,
+                FOREIGN KEY(user_id) REFERENCES users(id)
+            );
+        ''')
+
+        # Add column if it doesn't exist (PostgreSQL version)
+        cursor.execute("""
+            DO $$
+            BEGIN
+                BEGIN
+                    ALTER TABLE parsed_receipts ADD COLUMN imei_iccid_pairs TEXT;
+                EXCEPTION WHEN duplicate_column THEN
+                    -- Column already exists, do nothing
+                END;
+            END $$;
+        """)
+
+        # Check if admin user exists
+        cursor.execute("SELECT * FROM users WHERE username = 'admin'")
+        admin_exists = cursor.fetchone()
+
+        # Create default admin if it doesn't exist
+        if not admin_exists:
+            admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
+            cursor.execute('''
+                INSERT INTO users (name, email, phone, username, password, approved, is_admin)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
+
+        # Commit all changes
         db.commit()
-    except psycopg2.errors.DuplicateColumn:
-        # This error occurs if the column already exists
-        # You can safely ignore this
-        print("Column 'imei_iccid_pairs' already exists")
+
     except Exception as e:
-        # Catch and print any other unexpected errors
+        # Rollback in case of any error
+        db.rollback()
         print(f"Error in init_db: {e}")
     finally:
         # Always close the cursor
         cursor.close()
-
-def update_db():
-    db = get_db()
-    cursor = db.cursor()
-    
-    # Check if column exists
-    cursor.execute("PRAGMA table_info(parsed_receipts)")
-    columns = cursor.fetchall()
-    column_names = [column[1] for column in columns]
-    
-    # Add column if it doesn't exist
-    if 'imei_iccid_pairs' not in column_names:
-        try:
-            cursor.execute('ALTER TABLE parsed_receipts ADD COLUMN imei_iccid_pairs TEXT')
-            db.commit()
-            print("Added imei_iccid_pairs column")
-        except sqlite3.OperationalError as e:
-            print(f"Error adding column: {e}")
-    else:
-        print("Column already exists")
-
-    # Create the users table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS users(
-            id SERIAL PRIMARY KEY,
-            name VARCHAR(255) UNIQUE NOT NULL,
-            email TEXT UNIQUE NOT NULL,
-            phone TEXT UNIQUE NOT NULL,
-            username TEXT UNIQUE,
-            password TEXT,
-            approved INTEGER DEFAULT 0,
-            is_admin INTEGER DEFAULT 0,
-            rejected INTEGER DEFAULT 0
-        );
-    ''')
-
-    # Create the parsed_receipts_new table
-    cursor.execute('''
-        CREATE TABLE IF NOT EXISTS parsed_receipts (
-            id SERIAL PRIMARY KEY,
-            company_name TEXT,
-            customer TEXT,
-            order_date TEXT,
-            sales_person TEXT,
-            rq_invoice TEXT,
-            total_price REAL,
-            accessory_prices TEXT,
-            upgrades_count INTEGER,
-            activations_count INTEGER,
-            ppp_present BOOLEAN,
-            activation_fee_sum REAL,
-            user_id INTEGER,
-            date_submitted TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-            imei_iccid_pairs TEXT,  -- Store as JSON string
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        );
-    ''')
-
-    # These are the new lines added after your existing cursor.execute statements:
-    
-    # Check if admin user exists
-    cursor = db.cursor()
-    cursor.execute("SELECT * FROM users WHERE username = 'admin'")
-    admin_exists = cursor.fetchone()
-
-    # Create default admin if it doesn't exist
-    if not admin_exists:
-        admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
-        cursor.execute('''
-            INSERT INTO users (name, email, phone, username, password, approved, is_admin)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
-        ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
-
-    
-
-    db.commit()
-
 ALLOWED_EXTENSIONS = {'pdf'}
 def allowed_file(filename):
     """Check if the uploaded file has an allowed extension"""
