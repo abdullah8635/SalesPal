@@ -20,8 +20,6 @@ import psycopg2
 from functools import wraps
 
 
-app = Flask(__name__)
-app.secret_key = 'your_secret_key'
 app.permanent_session_lifetime = timedelta(minutes=60)
 app.config['SESSION_COOKIE_SECURE'] = True  # For HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
@@ -61,7 +59,7 @@ class User(UserMixin):
 def load_user(user_id):
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("SELECT id, name, is_admin FROM users WHERE id = ?", (user_id,))
+    cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (user_id,))
     user = cursor.fetchone()
     if user:
         return User(
@@ -85,7 +83,7 @@ def init_db():
     db = get_db()
 
     try:
-        db.execute('ALTER TABLE parsed_receipts ADD COLUMN imei_iccid_pairs TEXT')
+        cursor.execute('ALTER TABLE parsed_receipts ADD COLUMN imei_iccid_pairs TEXT')
         db.commit()
     except sqlite3.OperationalError:
         # Column might already exist
@@ -112,10 +110,10 @@ def update_db():
         print("Column already exists")
 
     # Create the users table
-    db.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS users(
-            id INTEGER PRIMARY KEY AUTOINCREMENT
-            name TEXT UNIQUE NOT NULL,
+            id SERIAL PRIMARY KEY,
+            name VARCHAR(255) UNIQUE NOT NULL,
             email TEXT UNIQUE NOT NULL,
             phone TEXT UNIQUE NOT NULL,
             username TEXT UNIQUE,
@@ -127,9 +125,9 @@ def update_db():
     ''')
 
     # Create the parsed_receipts_new table
-    db.execute('''
+    cursor.execute('''
         CREATE TABLE IF NOT EXISTS parsed_receipts (
-            id INTEGER PRIMARY KEY AUTOINCREMENT
+            id SERIAL PRIMARY KEY,
             company_name TEXT,
             customer TEXT,
             order_date TEXT,
@@ -148,7 +146,7 @@ def update_db():
         );
     ''')
 
-    # These are the new lines added after your existing db.execute statements:
+    # These are the new lines added after your existing cursor.execute statements:
     
     # Check if admin user exists
     cursor = db.cursor()
@@ -158,9 +156,9 @@ def update_db():
     # Create default admin if it doesn't exist
     if not admin_exists:
         admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
-        db.execute('''
+        cursor.execute('''
             INSERT INTO users (name, email, phone, username, password, approved, is_admin)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            VALUES (%s, %s, %s, %s, %s, %s, %s)
         ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
 
     
@@ -187,7 +185,7 @@ def update_receipt_details(rq_invoice):
         cursor.execute("""
             SELECT user_id, imei_iccid_pairs
             FROM parsed_receipts 
-            WHERE rq_invoice = ?
+            WHERE rq_invoice = %s
         """, (rq_invoice,))
         
         receipt = cursor.fetchone()
@@ -231,7 +229,7 @@ def update_receipt_details(rq_invoice):
 
                 # Store device info as JSON
                 device_info = json.dumps(updates['device_info'])
-                update_columns.append('imei_iccid_pairs = ?')
+                update_columns.append('imei_iccid_pairs = %s')
                 update_values.append(device_info)
                 del updates['device_info']
             except (TypeError, ValueError) as e:
@@ -242,7 +240,7 @@ def update_receipt_details(rq_invoice):
             # Map frontend field to database column
             if frontend_field in field_mapping:
                 db_column = field_mapping[frontend_field]
-                update_columns.append(f'{db_column} = ?')
+                update_columns.append(f'{db_column} = %s')
                 update_values.append(value)
 
         # Construct and execute update query
@@ -250,7 +248,7 @@ def update_receipt_details(rq_invoice):
             update_query = f"""
                 UPDATE parsed_receipts 
                 SET {', '.join(update_columns)}
-                WHERE rq_invoice = ?
+                WHERE rq_invoice = %s
             """
             update_values.append(rq_invoice)
 
@@ -303,7 +301,8 @@ def non_admin_dashboard():
         db = get_db()
         
         # Query to get the user's name using the username
-        cursor = db.execute("SELECT name FROM users WHERE username = ?", (username,))
+        cursor = db.cursor()
+        cursor.execute("SELECT name FROM users WHERE username = %s", (username,))
         user = cursor.fetchone()
         
         if user:
@@ -324,7 +323,7 @@ def delete_receipt(receipt_id):
     cursor = db.cursor()
     
     # Delete the receipt from the database
-    cursor.execute("DELETE FROM parsed_receipts WHERE id = ?", (receipt_id,))
+    cursor.execute("DELETE FROM parsed_receipts WHERE id = %s", (receipt_id,))
     db.commit()
     
     return redirect(url_for('view_receipts'))
@@ -380,8 +379,8 @@ def register():
         db = get_db()
         try:
             # Save user with empty username and approved set to 0
-            db.execute(
-                "INSERT INTO users (name, email, phone, password, approved) VALUES (?, ?, ?, ?, 0)",
+            cursor.execute(
+                "INSERT INTO users (name, email, phone, password, approved) VALUES (%s, %s, %s, %s, 0)",
                 (name, email, phone, hashed_password)
             )
             db.commit()
@@ -417,7 +416,7 @@ def login():
         cursor.execute("""
             SELECT id, name, email, phone, username, password, approved, is_admin 
             FROM users 
-            WHERE username = ?
+            WHERE username = %s
         """, (username,))
         user_data = cursor.fetchone()
         
@@ -468,7 +467,7 @@ def home():
 def admin_home():
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("SELECT name FROM users WHERE id = ?", (session['user_id'],))
+    cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
     user = cursor.fetchone()
     if 'admin' not in session:
         return redirect(url_for('login'))
@@ -487,7 +486,7 @@ def employee_list():
 
     cursor.execute("SELECT id, name, email, phone, username, approved, is_admin, rejected FROM users")
     employees = cursor.fetchall()
-    cursor.execute("SELECT name FROM users WHERE id = ?", (session['user_id'],))
+    cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
     user = cursor.fetchone()
     current_user = user[0] if user else 'User'
     return render_template('employee_list.html', employees=employees, current_user=current_user)
@@ -509,7 +508,7 @@ def assign_username(user_id):
     db = get_db()
     cursor = db.cursor()
 
-    cursor.execute("UPDATE users SET username = ? WHERE id = ?", (username, user_id))
+    cursor.execute("UPDATE users SET username = %s WHERE id = %s", (username, user_id))
     db.commit()
 
     return redirect(url_for('employee_list'))
@@ -523,7 +522,7 @@ def approve_user_account(user_id):
     cursor = db.cursor()
     
     # Set approved status to 1
-    cursor.execute("UPDATE users SET approved = 1 WHERE id = ?", (user_id,))
+    cursor.execute("UPDATE users SET approved = 1 WHERE id = %s", (user_id,))
     db.commit()
     
     return redirect(url_for('employee_list'))
@@ -537,7 +536,7 @@ def approve_account(user_id):
     cursor = db.cursor()
 
     # Update the user's approved status to 1
-    cursor.execute("UPDATE users SET approved = 1, rejected = 0 WHERE id = ?", (user_id,))
+    cursor.execute("UPDATE users SET approved = 1, rejected = 0 WHERE id = %s", (user_id,))
     db.commit()
 
     return redirect(url_for('employee_list'))
@@ -551,7 +550,7 @@ def reject_account(user_id):
     cursor = db.cursor()
 
     # Set the rejected flag to 1
-    cursor.execute("UPDATE users SET rejected = 1, approved = 0 WHERE id = ?", (user_id,))
+    cursor.execute("UPDATE users SET rejected = 1, approved = 0 WHERE id = %s", (user_id,))
     db.commit()
 
     return redirect(url_for('employee_list'))
@@ -565,7 +564,7 @@ def delete_account(user_id):
     cursor = db.cursor()
     
     # Delete the user by ID
-    cursor.execute("DELETE FROM users WHERE id = ?", (user_id,))
+    cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
     db.commit()
     
     return redirect(url_for('employee_list'))
@@ -625,9 +624,9 @@ def extract_info_from_pdf(pdf_file) -> Tuple:
 
     # Regular expression patterns
     company_pattern = r"Sale\nR\d+\n(\d{3}:\s[A-Za-z\s]+)"
-    customer_pattern = r"Customer\s*(.*?)(?:\n|\s*\()"
+    customer_pattern = r"Customer\s*(.*%s)(%s:\n|\s*\()"
     order_date_pattern = r"Order Date\s*(\d{1,2}-\w{3}-\d{4}\s*\d{1,2}:\d{2}:\d{2}\s*\w*)"
-    sales_person_pattern = r"Tendered By:\s*(.*?)(?:\n|$)"
+    sales_person_pattern = r"Tendered By:\s*(.*%s)(%s:\n|$)"
     rq_invoice_pattern = r"Sale\n(R\d+)\n"
     
     # Get IMEI/ICCID pairs
@@ -675,7 +674,7 @@ def extract_info_from_pdf(pdf_file) -> Tuple:
 
 def calculate_accessories(pdf_text: str) -> Tuple[float, List[float]]:
     """Calculate accessory prices from PDF text."""
-    accessory_pattern = r'([A-Z0-9]+)\n(.*?)\n(?:.*?@\$(\d+\.\d+)).*?Item Total\s+\$(\d+\.\d+)'
+    accessory_pattern = r'([A-Z0-9]+)\n(.*%s)\n(%s:.*%s@\$(\d+\.\d+)).*%sItem Total\s+\$(\d+\.\d+)'
     non_accessory_identifiers = [
         'DEFBYOD', 'UNLCOR', 'UNLMORE', 'ACTIVATION',
         'IMEI:', 'ICCID:', 'SIM', 'STHN', 'SSGN',
@@ -706,7 +705,7 @@ def upload_pdf():
         # Get logged in user's name for the template
         db = get_db()
         cursor = db.cursor()
-        cursor.execute("SELECT name FROM users WHERE id = ?", (session['user_id'],))
+        cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
         user = cursor.fetchone()
         current_user = user[0] if user else 'User'
         return render_template('upload.html', current_user=current_user)
@@ -831,7 +830,7 @@ def confirm_receipt():
     # Get logged in user's name
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("SELECT name FROM users WHERE id = ?", (session['user_id'],))
+    cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
     user = cursor.fetchone()
     logged_in_user = user[0] if user else None
     
@@ -866,7 +865,7 @@ def confirm_receipt():
                 company_name, customer, order_date, sales_person, rq_invoice, 
                 total_price, accessory_prices, upgrades_count, activations_count, 
                 ppp_present, activation_fee_sum, user_id, imei_iccid_pairs
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         ''', (
             form_data['company_name'], form_data['customer'], form_data['order_date'],
             form_data['sales_person'], form_data['rq_invoice'], form_data['total_price'],
@@ -908,12 +907,12 @@ def view_receipts():
     cursor = db.cursor()
 
     # Get the current user's name
-    cursor.execute("SELECT name FROM users WHERE id = ?", (session['user_id'],))
+    cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
     user_data = cursor.fetchone()
     current_user = user_data[0] if user_data else 'User'
 
     # Fetch user details to check if the logged-in user is an admin
-    cursor.execute("SELECT * FROM users WHERE id = ?", (session['user_id'],))
+    cursor.execute("SELECT * FROM users WHERE id = %s", (session['user_id'],))
     user = cursor.fetchone()
     
     if user and user[7] == 1:  # Admin user
@@ -930,7 +929,7 @@ def view_receipts():
              r.*, u.name as uploader_name
             FROM parsed_receipts r
             LEFT JOIN users u ON r.user_id = u.id
-            WHERE r.user_id = ?
+            WHERE r.user_id = %s
         """, (session['user_id'],))
     
     receipts = cursor.fetchall()
@@ -945,7 +944,7 @@ def receipt_details(rq_invoice):
     cursor = db.cursor()
 
     # Fetch user details to check if admin
-    cursor.execute("SELECT id, name, is_admin FROM users WHERE id = ?", (session['user_id'],))
+    cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (session['user_id'],))
     user = cursor.fetchone()
     is_admin = user and user[2] == 1
     current_user = user[1] if user else 'User'
@@ -970,7 +969,7 @@ def receipt_details(rq_invoice):
                 u.name as uploader_name
             FROM parsed_receipts r
             LEFT JOIN users u ON r.user_id = u.id
-            WHERE r.rq_invoice = ?
+            WHERE r.rq_invoice = %s
         """, (rq_invoice,))
     else:
         cursor.execute("""
@@ -991,7 +990,7 @@ def receipt_details(rq_invoice):
                 u.name as uploader_name
             FROM parsed_receipts r
             LEFT JOIN users u ON r.user_id = u.id
-            WHERE r.rq_invoice = ? AND r.user_id = ?
+            WHERE r.rq_invoice = %s AND r.user_id = %s
         """, (rq_invoice, session['user_id']))
 
     receipt = cursor.fetchone()
@@ -1016,7 +1015,7 @@ def commission():
     cursor = db.cursor()
     
     # Check if user is admin
-    cursor.execute("SELECT is_admin FROM users WHERE id = ?", (session['user_id'],))
+    cursor.execute("SELECT is_admin FROM users WHERE id = %s", (session['user_id'],))
     user = cursor.fetchone()
     is_admin = user and user[0] == 1
     current_user = user[0] if user else 'User'
@@ -1072,7 +1071,7 @@ def commission():
             LEFT JOIN 
                 parsed_receipts ON users.id = parsed_receipts.user_id
             WHERE 
-                users.id = ?
+                users.id = %s
             GROUP BY 
                 users.username, users.name
         ''', (session['user_id'],))
