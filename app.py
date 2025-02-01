@@ -78,7 +78,7 @@ limiter = Limiter(
 )
 
 DATABASE = '/data/users.db'
-os.makedirs('/data', exist_ok=True)  # Create the directory if it doesn't exist
+os.makedirs('/home/ubuntu/SalesPal/data', exist_ok=True)  # Create the directory if it doesn't exist
 
 def init_db():
     db = get_db()
