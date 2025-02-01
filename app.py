@@ -28,10 +28,10 @@ app.config['SESSION_COOKIE_SECURE'] = True  # For HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
 
-app.config['DB_HOST'] = 'localhost'  # You'll change this to your AWS RDS endpoint
-app.config['DB_NAME'] = 'salespal'
-app.config['DB_USER'] = 'yourusername'
-app.config['DB_PASSWORD'] = 'yourpassword'
+app.config['DB_HOST'] = os.environ.get('DB_HOST', 'localhost')
+app.config['DB_NAME'] = os.environ.get('DB_NAME', 'salespal')
+app.config['DB_USER'] = os.environ.get('DB_USER', 'yourusername')
+app.config['DB_PASSWORD'] = os.environ.get('DB_PASSWORD', 'yourpassword')
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
@@ -81,12 +81,25 @@ limiter = Limiter(
 DATABASE = '/data/users.db'
 os.makedirs('/home/ubuntu/SalesPal/data', exist_ok=True)  # Create the directory if it doesn't exist
 
+def get_db():
+    if 'db' not in g:
+        g.db = psycopg2.connect(
+            host=app.config['DB_HOST'],
+            database=app.config['DB_NAME'],
+            user=app.config['DB_USER'],
+            password=app.config['DB_PASSWORD']
+        )
+    return g.db
+
 def init_db():
     db = get_db()
     cursor = db.cursor()
     
     try:
-        # Create users table
+        # Explicitly set search path to public schema
+        cursor.execute('SET search_path TO public')
+
+        # Create users table first
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS users (
                 id SERIAL PRIMARY KEY,
@@ -123,18 +136,6 @@ def init_db():
             );
         ''')
 
-        # Add column if it doesn't exist (PostgreSQL version)
-        cursor.execute("""
-            DO $$
-            BEGIN
-                BEGIN
-                    ALTER TABLE parsed_receipts ADD COLUMN imei_iccid_pairs TEXT;
-                EXCEPTION WHEN duplicate_column THEN
-                    -- Column already exists, do nothing
-                END;
-            END $$;
-        """)
-
         # Check if admin user exists
         cursor.execute("SELECT * FROM users WHERE username = 'admin'")
         admin_exists = cursor.fetchone()
@@ -149,6 +150,7 @@ def init_db():
 
         # Commit all changes
         db.commit()
+        print("Database initialized successfully")
 
     except Exception as e:
         # Rollback in case of any error
@@ -157,6 +159,7 @@ def init_db():
     finally:
         # Always close the cursor
         cursor.close()
+        
 ALLOWED_EXTENSIONS = {'pdf'}
 def allowed_file(filename):
     """Check if the uploaded file has an allowed extension"""
@@ -323,17 +326,6 @@ def delete_receipt(receipt_id):
 def round_up(value, decimals=2):
     factor = 10 ** decimals
     return math.ceil(value * factor) / factor
-
-# Database connection function
-def get_db():
-    if 'db' not in g:
-        g.db = psycopg2.connect(
-            host=app.config['DB_HOST'],
-            database=app.config['DB_NAME'],
-            user=app.config['DB_USER'],
-            password=app.config['DB_PASSWORD']
-        )
-    return g.db
 
 # Close the database connection at the end of each request
 @app.teardown_appcontext
