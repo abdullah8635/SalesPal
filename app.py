@@ -17,6 +17,7 @@ from flask_mysqldb import MySQL
 import io
 from werkzeug.utils import secure_filename
 import psycopg2
+from psycopg2 import errors
 from functools import wraps
 
 app = Flask(__name__)
@@ -82,13 +83,23 @@ os.makedirs('/home/ubuntu/SalesPal/data', exist_ok=True)  # Create the directory
 
 def init_db():
     db = get_db()
+    # Create a cursor
+    cursor = db.cursor()
 
     try:
+        # Use the cursor to execute the ALTER TABLE command
         cursor.execute('ALTER TABLE parsed_receipts ADD COLUMN imei_iccid_pairs TEXT')
         db.commit()
-    except sqlite3.OperationalError:
-        # Column might already exist
-        pass
+    except psycopg2.errors.DuplicateColumn:
+        # This error occurs if the column already exists
+        # You can safely ignore this
+        print("Column 'imei_iccid_pairs' already exists")
+    except Exception as e:
+        # Catch and print any other unexpected errors
+        print(f"Error in init_db: {e}")
+    finally:
+        # Always close the cursor
+        cursor.close()
 
 def update_db():
     db = get_db()
