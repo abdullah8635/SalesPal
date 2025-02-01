@@ -19,15 +19,19 @@ from werkzeug.utils import secure_filename
 import psycopg2
 from functools import wraps
 
+app = Flask(__name__)
 
+app.secret_key = 'your_secret_key'
 app.permanent_session_lifetime = timedelta(minutes=60)
 app.config['SESSION_COOKIE_SECURE'] = True  # For HTTPS
 app.config['SESSION_COOKIE_HTTPONLY'] = True
 app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-app.config['MYSQL_HOST'] = 'localhost'  # You'll change this to your AWS RDS endpoint
-app.config['MYSQL_USER'] = 'root'
-app.config['MYSQL_PASSWORD'] = ''
-app.config['MYSQL_DB'] = 'smtc_tracker'
+
+app.config['DB_HOST'] = 'localhost'  # You'll change this to your AWS RDS endpoint
+app.config['DB_NAME'] = 'salespal'
+app.config['DB_USER'] = 'yourusername'
+app.config['DB_PASSWORD'] = 'yourpassword'
+
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
 
@@ -35,9 +39,6 @@ if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
 
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-
-app = Flask(__name__)
-app.secret_key = 'your_secret_key'  # make sure this exists
 
 # Initialize Flask-Login
 login_manager = LoginManager()
