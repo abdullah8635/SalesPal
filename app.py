@@ -3,7 +3,7 @@ import re
 from flask_bcrypt import Bcrypt
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-from flask_limiter.storage import RedisStorage
+from limits.storage import RedisStorage
 from datetime import timedelta, datetime
 from typing import List, Dict, Tuple, Optional
 import sqlite3
@@ -76,12 +76,8 @@ bcrypt = Bcrypt(app)
 limiter = Limiter(
     app=app,
     key_func=get_remote_address,
-    storage=RedisStorage('redis://localhost:6379'),
-    default_limits=["200 per day", "1000 per hour"],
-    storage_options={
-        'connection_pool': True  # Enable connection pooling
-    },
-    strategy="fixed-window"  # or "moving-window" if you prefer
+    storage_uri="redis://localhost:6379",
+    default_limits=["200 per day", "1000 per hour"]
 )
 
 @app.errorhandler(429)
