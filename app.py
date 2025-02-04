@@ -3,6 +3,7 @@ import re
 from flask_bcrypt import Bcrypt
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
+from flask_limiter.storage import RedisStorage
 from datetime import timedelta, datetime
 from typing import List, Dict, Tuple, Optional
 import sqlite3
@@ -75,8 +76,23 @@ bcrypt = Bcrypt(app)
 limiter = Limiter(
     app=app,
     key_func=get_remote_address,
-    default_limits=["200 per day", "1000 per hour"]
+    storage=RedisStorage('redis://localhost:6379'),
+    default_limits=["200 per day", "1000 per hour"],
+    storage_options={
+        'connection_pool': True  # Enable connection pooling
+    },
+    strategy="fixed-window"  # or "moving-window" if you prefer
 )
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify(error="Rate limit exceeded. Please try again later."), 429
+
+try:
+    limiter.storage.storage.ping()
+    app.logger.info("Successfully connected to Redis")
+except Exception as e:
+    app.logger.error(f"Failed to connect to Redis: {str(e)}")
 
 DATABASE = '/data/users.db'
 os.makedirs('/home/ubuntu/SalesPal/data', exist_ok=True)  # Create the directory if it doesn't exist
