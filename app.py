@@ -26,6 +26,41 @@ from logging.handlers import RotatingFileHandler
 
 app = Flask(__name__)
 
+# Add this after app = Flask(__name__)
+
+def create_admin_user():
+    try:
+        db = get_db()
+        if db is None:
+            app.logger.error("Could not establish database connection")
+            return
+            
+        with db.cursor() as cursor:
+            # Check if admin user exists
+            cursor.execute("SELECT * FROM users WHERE username = 'admin'")
+            admin_exists = cursor.fetchone()
+            
+            # Create default admin if it doesn't exist
+            if not admin_exists:
+                admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
+                cursor.execute('''
+                    INSERT INTO users (name, email, phone, username, password, approved, is_admin)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
+                db.commit()
+                app.logger.info("Default admin user created")
+    except Exception as e:
+        if 'db' in locals():
+            db.rollback()
+        app.logger.error(f"Error creating admin user: {str(e)}")
+    finally:
+        if 'db' in locals():
+            db.close()
+
+# Call this function when the app starts
+with app.app_context():
+    create_admin_user()
+
 app.secret_key = 'your_secret_key'
 app.permanent_session_lifetime = timedelta(minutes=60)
 app.config['SESSION_COOKIE_SECURE'] = True  # For HTTPS
@@ -541,11 +576,12 @@ def login():
                             session.modified = True
                             
                             # Set session data with validation
-                            session['logged_in'] = True
-                            session['username'] = username
-                            session['user_id'] = int(user_data[0])
+                            
                             if user_data[7] == 1:
                                 session['admin'] = True
+                                session['logged_in'] = True
+                                session['username'] = username
+                                session['user_id'] = int(user_data[0])
                             
                             # Log in the user with Flask-Login
                             login_user(user, 
