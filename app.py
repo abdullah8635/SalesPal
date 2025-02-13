@@ -54,22 +54,81 @@ def get_db():
         return None
 
 def return_db(conn):
-    db_pool.putconn(conn)
-    
+    if conn:
+        db_pool.putconn(conn)
+        
+def init_db():
+    db = None
+    try:
+        db = get_db()
+        if db is None:
+            app.logger.error("Could not establish database connection")
+            return
+            
+        with db.cursor() as cursor:
+            # Create tables and admin user
+            cursor.execute('SET search_path TO public')
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) UNIQUE NOT NULL,
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    phone VARCHAR(20) UNIQUE NOT NULL,
+                    username VARCHAR(50) UNIQUE,
+                    password TEXT,
+                    approved INTEGER DEFAULT 0,
+                    is_admin INTEGER DEFAULT 0,
+                    rejected INTEGER DEFAULT 0
+                );
+            ''')
+            
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS parsed_receipts (
+                    id SERIAL PRIMARY KEY,
+                    company_name TEXT,
+                    customer TEXT,
+                    order_date TEXT,
+                    sales_person TEXT,
+                    rq_invoice TEXT,
+                    total_price REAL,
+                    accessory_prices TEXT,
+                    upgrades_count INTEGER,
+                    activations_count INTEGER,
+                    ppp_present BOOLEAN,
+                    activation_fee_sum REAL,
+                    user_id INTEGER,
+                    date_submitted TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    imei_iccid_pairs TEXT,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
+                );
+            ''')
+            
+            db.commit()
+            app.logger.info("Database tables created successfully")
+            
+    except Exception as e:
+        app.logger.error(f"Database initialization error: {str(e)}")
+        if db:
+            db.rollback()
+    finally:
+        if db:
+            return_db(db)
+            
 @app.teardown_appcontext
 def close_connection(exception):
-    """Ensure database connections are closed at the end of each request"""
     db = g.pop('db', None)
     if db is not None:
         try:
-            db.close()
+            return_db(db)
             app.logger.debug("Database connection closed")
         except Exception as e:
             app.logger.error(f"Error closing database connection: {e}")
             # Even if close fails, remove the reference
-            db = None    
+                
         
 def create_admin_user():
+    db = None
     try:
         db = get_db()
         if db is None:
@@ -91,12 +150,12 @@ def create_admin_user():
                 db.commit()
                 app.logger.info("Default admin user created")
     except Exception as e:
-        if 'db' in locals():
+        if db:
             db.rollback()
         app.logger.error(f"Error creating admin user: {str(e)}")
     finally:
-        if 'db' in locals():
-            db.close()
+        if db:
+            return_db(db)
 
 # Call this function when the app starts
 with app.app_context():
