@@ -209,16 +209,35 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+try:
+    db = get_db()
+    if db is None:
+        app.logger.error("Could not establish database connection")
+        return "Database connection error", 500
+
+    with db.cursor() as cursor:
         # Check if admin user exists
-cursor.execute("SELECT * FROM users WHERE username = 'admin'")
-admin_exists = cursor.fetchone()
+        cursor.execute("SELECT * FROM users WHERE username = 'admin'")
+        admin_exists = cursor.fetchone()
+        
         # Create default admin if it doesn't exist
-if not admin_exists:
-    admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
-    cursor.execute('''
-        INSERT INTO users (name, email, phone, username, password, approved, is_admin)
-        VALUES (%s, %s, %s, %s, %s, %s, %s)
-    ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
+        if not admin_exists:
+            admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
+            cursor.execute('''
+                INSERT INTO users (name, email, phone, username, password, approved, is_admin)
+                VALUES (%s, %s, %s, %s, %s, %s, %s)
+            ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
+            db.commit()
+            app.logger.info("Default admin user created")
+
+except Exception as e:
+    if db:
+        db.rollback()
+    app.logger.error(f"Error setting up admin user: {str(e)}")
+    raise
+finally:
+    if 'db' in locals():
+        db.close()
 
 @app.route('/api/update_receipt/<string:rq_invoice>', methods=['POST'])
 @login_required
