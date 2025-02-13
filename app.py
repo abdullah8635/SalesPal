@@ -1,5 +1,6 @@
 from flask import Flask, request, session, flash, redirect, url_for, render_template, g, json, jsonify
 import re
+import traceback
 from flask_bcrypt import Bcrypt
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -26,11 +27,13 @@ from logging.handlers import RotatingFileHandler
 
 app = Flask(__name__)
 
-app.secret_key = 'your_secret_key'
-app.permanent_session_lifetime = timedelta(minutes=60)
-app.config['SESSION_COOKIE_SECURE'] = True  # For HTTPS
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+app.config.update(
+    SECRET_KEY=os.urandom(24),  # Cryptographically secure random key
+    PERMANENT_SESSION_LIFETIME=timedelta(minutes=60),
+    SESSION_COOKIE_SECURE=True,  # Ensure HTTPS
+    SESSION_COOKIE_HTTPONLY=True,  # Prevent JavaScript access
+    SESSION_COOKIE_SAMESITE='Lax',  # CSRF protection
+)
 
 app.config['DB_HOST'] = 'localhost'
 app.config['DB_NAME'] = 'salespal'
@@ -189,8 +192,16 @@ class User(UserMixin):
     def get_id(self):
         return self.id
 
+logging.basicConfig(level=logging.DEBUG)
+logging.getLogger().addHandler(logging.StreamHandler())
 
-
+@app.errorhandler(500)
+def handle_500(e):
+    # Log the full traceback
+    app.logger.error('An error occurred during a request.')
+    app.logger.error(traceback.format_exc())
+    return "Internal Server Error", 500
+    
 # User loader callback
 @login_manager.user_loader
 def load_user(user_id):
