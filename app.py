@@ -105,12 +105,8 @@ def get_db():
         print("Database connection successful")
         return connection
     except psycopg2.Error as e:
-        print(f"Database connection error: {e}")
-        print(f"Connection details:")
-        print(f"Host: {app.config['DB_HOST']}")
-        print(f"Database: {app.config['DB_NAME']}")
-        print(f"User: {app.config['DB_USER']}")
-        raise
+        app.logger.error(f"Database connection error: {e}")
+        return None 
 
 def init_db():
     db = None
@@ -303,39 +299,61 @@ def non_admin_dashboard():
     
     # If the user is not an admin, show them the dashboard with the three boxes
     if 'admin' not in session:
-        # Get the username from session
-        username = session.get('username')
-        
-        # Create database cursor
-        db = get_db()
-        
-        # Query to get the user's name using the username
-        cursor = db.cursor()
-        cursor.execute("SELECT name FROM users WHERE username = %s", (username,))
-        user = cursor.fetchone()
-        
-        if user:
-            # Pass the name to the template
-            return render_template('non_admin_dashboard.html', current_user=user[0])
-        else:
-            # Fallback to username if name not found
-            return render_template('non_admin_dashboard.html', current_user=username)
+        try:
+            username = session.get('username')
+            db = get_db()
+            
+            if db is None:
+                app.logger.error("Could not establish database connection")
+                return "Database connection error", 500
+                
+            with db.cursor() as cursor:
+                # Query to get the user's name using the username
+                cursor.execute("SELECT name FROM users WHERE username = %s", (username,))
+                user = cursor.fetchone()
+                
+                if user:
+                    # Pass the name to the template
+                    return render_template('non_admin_dashboard.html', current_user=user[0])
+                else:
+                    # Fallback to username if name not found
+                    return render_template('non_admin_dashboard.html', current_user=username)
+                    
+        except Exception as e:
+            app.logger.error(f"Database error in non_admin_dashboard: {str(e)}")
+            return "An error occurred", 500
+        finally:
+            if 'db' in locals():
+                db.close()
     
-    return redirect(url_for('admin_home'))# Redirect admins to their home page
+    return redirect(url_for('admin_home'))
 
 @app.route('/delete_receipt/<int:receipt_id>', methods=['POST'])
 def delete_receipt(receipt_id):
     if 'logged_in' not in session:
         return redirect(url_for('login'))
     
-    db = get_db()
-    cursor = db.cursor()
-    
-    # Delete the receipt from the database
-    cursor.execute("DELETE FROM parsed_receipts WHERE id = %s", (receipt_id,))
-    db.commit()
-    
-    return redirect(url_for('view_receipts'))
+    try:
+        db = get_db()
+        if db is None:
+            app.logger.error("Could not establish database connection")
+            return "Database connection error", 500
+            
+        with db.cursor() as cursor:
+            # Delete the receipt from the database
+            cursor.execute("DELETE FROM parsed_receipts WHERE id = %s", (receipt_id,))
+            db.commit()
+            
+        return redirect(url_for('view_receipts'))
+        
+    except Exception as e:
+        if db:
+            db.rollback()
+        app.logger.error(f"Error deleting receipt {receipt_id}: {str(e)}")
+        return "Error deleting receipt", 500
+    finally:
+        if 'db' in locals():
+            db.close()
 
 def round_up(value, decimals=2):
     factor = 10 ** decimals
@@ -352,15 +370,26 @@ def close_connection(exception):
 def pending_accounts():
     if 'admin' not in session:
         return redirect(url_for('login'))
-
-    db = get_db()
-    cursor = db.cursor()
-    
-    # Select pending accounts for admin review
-    cursor.execute("SELECT id, name, email, phone FROM users WHERE approved = 0")
-    pending_users = cursor.fetchall()
-    
-    return render_template('pending_accounts.html', pending_users=pending_users)
+        
+    try:
+        db = get_db()
+        if db is None:
+            app.logger.error("Could not establish database connection")
+            return "Database connection error", 500
+            
+        with db.cursor() as cursor:
+            # Select pending accounts for admin review
+            cursor.execute("SELECT id, name, email, phone FROM users WHERE approved = 0")
+            pending_users = cursor.fetchall()
+            
+        return render_template('pending_accounts.html', pending_users=pending_users)
+        
+    except Exception as e:
+        app.logger.error(f"Error fetching pending accounts: {str(e)}")
+        return "Error loading pending accounts", 500
+    finally:
+        if 'db' in locals():
+            db.close()
 
 # Route for registering new users
 @app.route('/register', methods=['GET', 'POST'])
@@ -370,23 +399,39 @@ def register():
         email = request.form['email']
         phone = request.form['phone']
         
-        # Generate a random password
-        password = generate_random_password(10)
-        hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
-        
-        db = get_db()
         try:
-            # Save user with empty username and approved set to 0
-            cursor.execute(
-                "INSERT INTO users (name, email, phone, password, approved) VALUES (%s, %s, %s, %s, 0)",
-                (name, email, phone, hashed_password)
-            )
-            db.commit()
-        except sqlite3.IntegrityError:
+            # Generate a random password
+            password = generate_random_password(10)
+            hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+            
+            db = get_db()
+            if db is None:
+                app.logger.error("Could not establish database connection")
+                return "Registration service temporarily unavailable", 500
+                
+            with db.cursor() as cursor:
+                # Save user with empty username and approved set to 0
+                cursor.execute(
+                    "INSERT INTO users (name, email, phone, password, approved) VALUES (%s, %s, %s, %s, 0)",
+                    (name, email, phone, hashed_password)
+                )
+                db.commit()
+                
+            # Send password to the user (e.g., via email)
+            return "Your account has been created. Your password is: {}".format(password), 200
+            
+        except psycopg2.IntegrityError as e:
+            db.rollback()
+            app.logger.warning(f"Registration failed - duplicate entry: {str(e)}")
             return "Email or phone number already exists", 400
-
-        # Send password to the user (e.g., via email)
-        return "Your account has been created. Your password is: {}".format(password), 200
+        except Exception as e:
+            if 'db' in locals():
+                db.rollback()
+            app.logger.error(f"Registration error: {str(e)}")
+            return "Error during registration", 500
+        finally:
+            if 'db' in locals():
+                db.close()
     
     return render_template('register.html')
 
@@ -408,45 +453,64 @@ def login():
         username = request.form['username']
         password = request.form['password']
         
-        db = get_db()
-        cursor = db.cursor()
-        
-        cursor.execute("""
-            SELECT id, name, email, phone, username, password, approved, is_admin 
-            FROM users 
-            WHERE username = %s
-        """, (username,))
-        user_data = cursor.fetchone()
-        
-        if user_data and bcrypt.check_password_hash(user_data[5], password):  # password is at index 5
-            if user_data[6] == 1:  # approved status at index 6
-                # Create User object
-                user = User(
-                    id=user_data[0],      # id
-                    name=user_data[1],    # name
-                    is_admin=user_data[7]  # is_admin status at index 7
-                )
-                
-                # Log in the user
-                login_user(user)
-                
-                # Set session variables
-                session.permanent = True
-                session['logged_in'] = True
-                session['username'] = username
-                session['user_id'] = int(user_data[0])
-                
-                if user_data[7] == 1:  # is_admin
-                    session['admin'] = True
-                    return redirect(url_for('admin_home'))
-                
-                return redirect(url_for('non_admin_dashboard'))
-            else:
-                flash("Your account is pending approval. Please try again later.", "error")
+        try:
+            db = get_db()
+            if db is None:
+                app.logger.error("Could not establish database connection")
+                flash("Login service temporarily unavailable", "error")
                 return redirect(url_for('login'))
-        else:
-            flash("Invalid username or password", "error")
+                
+            with db.cursor() as cursor:
+                cursor.execute("""
+                    SELECT id, name, email, phone, username, password, approved, is_admin 
+                    FROM users 
+                    WHERE username = %s
+                """, (username,))
+                user_data = cursor.fetchone()
+                
+                if user_data and bcrypt.check_password_hash(user_data[5], password):  # password is at index 5
+                    if user_data[6] == 1:  # approved status at index 6
+                        try:
+                            # Create User object
+                            user = User(
+                                id=user_data[0],      # id
+                                name=user_data[1],    # name
+                                is_admin=user_data[7]  # is_admin status at index 7
+                            )
+                            
+                            # Log in the user
+                            login_user(user)
+                            
+                            # Set session variables
+                            session.permanent = True
+                            session['logged_in'] = True
+                            session['username'] = username
+                            session['user_id'] = int(user_data[0])
+                            
+                            if user_data[7] == 1:  # is_admin
+                                session['admin'] = True
+                                return redirect(url_for('admin_home'))
+                            
+                            return redirect(url_for('non_admin_dashboard'))
+                            
+                        except Exception as e:
+                            app.logger.error(f"Session error during login: {str(e)}")
+                            flash("Error during login process", "error")
+                            return redirect(url_for('login'))
+                    else:
+                        flash("Your account is pending approval. Please try again later.", "error")
+                        return redirect(url_for('login'))
+                else:
+                    flash("Invalid username or password", "error")
+                    return redirect(url_for('login'))
+                    
+        except Exception as e:
+            app.logger.error(f"Database error during login: {str(e)}")
+            flash("Login service temporarily unavailable", "error")
             return redirect(url_for('login'))
+        finally:
+            if 'db' in locals():
+                db.close()
         
     return render_template('login.html')
 
@@ -463,31 +527,61 @@ def home():
 
 @app.route('/admin/home')
 def admin_home():
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
-    user = cursor.fetchone()
     if 'admin' not in session:
         return redirect(url_for('login'))
-    current_user = user[0] if user else 'User'
-    
-    return render_template('admin_home.html', current_user=current_user)
+        
+    try:
+        db = get_db()
+        if db is None:
+            app.logger.error("Could not establish database connection")
+            return "Database connection error", 500
+            
+        with db.cursor() as cursor:
+            cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
+            user = cursor.fetchone()
+            current_user = user[0] if user else 'User'
+            
+        return render_template('admin_home.html', current_user=current_user)
+        
+    except Exception as e:
+        app.logger.error(f"Error in admin home: {str(e)}")
+        return "Error loading admin home", 500
+    finally:
+        if 'db' in locals():
+            db.close()
 
 # Admin page to list employees and approve/reject accounts
 @app.route('/admin/employees')
 def employee_list():
     if 'admin' not in session:
         return redirect(url_for('login'))
-
-    db = get_db()
-    cursor = db.cursor()
-
-    cursor.execute("SELECT id, name, email, phone, username, approved, is_admin, rejected FROM users")
-    employees = cursor.fetchall()
-    cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
-    user = cursor.fetchone()
-    current_user = user[0] if user else 'User'
-    return render_template('employee_list.html', employees=employees, current_user=current_user)
+        
+    try:
+        db = get_db()
+        if db is None:
+            app.logger.error("Could not establish database connection")
+            return "Database connection error", 500
+            
+        with db.cursor() as cursor:
+            # Get all employees data
+            cursor.execute("SELECT id, name, email, phone, username, approved, is_admin, rejected FROM users")
+            employees = cursor.fetchall()
+            
+            # Get current user's name
+            cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
+            user = cursor.fetchone()
+            current_user = user[0] if user else 'User'
+            
+        return render_template('employee_list.html', 
+                             employees=employees, 
+                             current_user=current_user)
+                             
+    except Exception as e:
+        app.logger.error(f"Error in employee list: {str(e)}")
+        return "Error loading employee list", 500
+    finally:
+        if 'db' in locals():
+            db.close()
 
 @app.route('/admin/commission')
 def view_commission():
