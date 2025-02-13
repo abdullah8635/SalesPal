@@ -19,7 +19,10 @@ import io
 from werkzeug.utils import secure_filename
 import psycopg2
 from psycopg2 import errors
+from psycopg2.pool import SimpleConnectionPool
 from functools import wraps
+import logging
+from logging.handlers import RotatingFileHandler
 
 app = Flask(__name__)
 
@@ -42,6 +45,10 @@ if not os.path.exists(app.config['UPLOAD_FOLDER']):
 
 from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
 
+handler = RotatingFileHandler('flask_app.log', maxBytes=10000, backupCount=3)
+handler.setLevel(logging.ERROR)
+app.logger.addHandler(handler)
+
 # Initialize Flask-Login
 login_manager = LoginManager()
 login_manager.init_app(app)
@@ -56,6 +63,25 @@ class User(UserMixin):
 
     def get_id(self):
         return self.id
+
+db_pool = SimpleConnectionPool(
+    minconn=1,
+    maxconn=10,
+    host=app.config['DB_HOST'],
+    database=app.config['DB_NAME'],
+    user=app.config['DB_USER'],
+    password=app.config['DB_PASSWORD']
+)
+
+def get_db():
+    try:
+        return db_pool.getconn()
+    except Exception as e:
+        app.logger.error(f"Failed to get database connection: {e}")
+        return None
+
+def return_db(conn):
+    db_pool.putconn(conn)
 
 # User loader callback
 @login_manager.user_loader
@@ -80,6 +106,11 @@ limiter = Limiter(
     default_limits=["200 per day", "1000 per hour"]
 )
 
+@app.errorhandler(Exception)
+def handle_exception(e):
+    app.logger.error(f"Unhandled exception: {str(e)}")
+    return "Internal server error", 500
+
 @app.errorhandler(429)
 def ratelimit_handler(e):
     return jsonify(error="Rate limit exceeded. Please try again later."), 429
@@ -89,6 +120,8 @@ try:
     app.logger.info("Successfully connected to Redis")
 except Exception as e:
     app.logger.error(f"Failed to connect to Redis: {str(e)}")
+    from limits.storage import MemoryStorage
+    limiter.storage = MemoryStorage()
 
 DATABASE = '/data/users.db'
 os.makedirs('/home/ubuntu/SalesPal/data', exist_ok=True)  # Create the directory if it doesn't exist
@@ -362,9 +395,16 @@ def round_up(value, decimals=2):
 # Close the database connection at the end of each request
 @app.teardown_appcontext
 def close_connection(exception):
+    """Ensure database connections are closed at the end of each request"""
     db = g.pop('db', None)
     if db is not None:
-        db.close()
+        try:
+            db.close()
+            app.logger.debug("Database connection closed")
+        except Exception as e:
+            app.logger.error(f"Error closing database connection: {e}")
+            # Even if close fails, remove the reference
+            db = None
 
 @app.route('/admin/pending_accounts')
 def pending_accounts():
@@ -468,32 +508,45 @@ def login():
                 """, (username,))
                 user_data = cursor.fetchone()
                 
-                if user_data and bcrypt.check_password_hash(user_data[5], password):  # password is at index 5
-                    if user_data[6] == 1:  # approved status at index 6
+                if user_data and bcrypt.check_password_hash(user_data[5], password):
+                    if user_data[6] == 1:  # approved status
                         try:
                             # Create User object
                             user = User(
-                                id=user_data[0],      # id
-                                name=user_data[1],    # name
-                                is_admin=user_data[7]  # is_admin status at index 7
+                                id=user_data[0],
+                                name=user_data[1],
+                                is_admin=user_data[7]
                             )
                             
-                            # Log in the user
-                            login_user(user)
+                            # Begin session management in a safe block
+                            session.clear()  # Clear any existing session data
                             
-                            # Set session variables
+                            # Set session parameters for security
                             session.permanent = True
+                            app.permanent_session_lifetime = timedelta(hours=1)  # Set session lifetime
+                            session.modified = True
+                            
+                            # Set session data with validation
                             session['logged_in'] = True
                             session['username'] = username
                             session['user_id'] = int(user_data[0])
-                            
-                            if user_data[7] == 1:  # is_admin
+                            if user_data[7] == 1:
                                 session['admin'] = True
-                                return redirect(url_for('admin_home'))
                             
+                            # Log in the user with Flask-Login
+                            login_user(user, 
+                                     remember=True, 
+                                     duration=timedelta(hours=1))
+                            
+                            # Regenerate session ID to prevent session fixation
+                            session.regenerate()
+                            
+                            if user_data[7] == 1:
+                                return redirect(url_for('admin_home'))
                             return redirect(url_for('non_admin_dashboard'))
                             
                         except Exception as e:
+                            session.clear()  # Clear session on error
                             app.logger.error(f"Session error during login: {str(e)}")
                             flash("Error during login process", "error")
                             return redirect(url_for('login'))
@@ -511,7 +564,10 @@ def login():
         finally:
             if 'db' in locals():
                 db.close()
-        
+    
+    # For GET requests, ensure no lingering session data
+    if request.method == 'GET':
+        session.clear()
     return render_template('login.html')
 
 # Home route
@@ -792,89 +848,133 @@ def upload_pdf():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
 
-    # Handle GET request - return the upload form template
+    # Handle GET request
     if request.method == 'GET':
-        # Get logged in user's name for the template
-        db = get_db()
-        cursor = db.cursor()
-        cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
-        user = cursor.fetchone()
-        current_user = user[0] if user else 'User'
-        return render_template('upload.html', current_user=current_user)
-    
+        try:
+            db = get_db()
+            if db is None:
+                app.logger.error("Could not establish database connection")
+                return "Database connection error", 500
+                
+            with db.cursor() as cursor:
+                cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
+                user = cursor.fetchone()
+                current_user = user[0] if user else 'User'
+                
+            return render_template('upload.html', current_user=current_user)
+            
+        except Exception as e:
+            app.logger.error(f"Database error in upload GET: {str(e)}")
+            return "Error loading upload page", 500
+        finally:
+            if 'db' in locals():
+                db.close()
+
     # Handle POST request - file upload
     try:
-        print("Request files:", request.files)
-        
-        if 'pdf[]' not in request.files and 'pdf' not in request.files:
-            print("No files in request")
+        # Validate request content type
+        if not request.files:
+            app.logger.warning("No files in request")
             return jsonify({'error': 'No files were uploaded'}), 400
 
-        # Handle both multiple and single file uploads
-        if 'pdf[]' in request.files:
-            files = request.files.getlist('pdf[]')
-        else:
-            files = [request.files['pdf']]
+        # Check file presence and type
+        if 'pdf[]' not in request.files and 'pdf' not in request.files:
+            app.logger.warning("Missing PDF files in request")
+            return jsonify({'error': 'No PDF files were uploaded'}), 400
 
+        # Handle both multiple and single file uploads
+        files = request.files.getlist('pdf[]') if 'pdf[]' in request.files else [request.files['pdf']]
+
+        # Validate files existence
         if not files or not any(file.filename for file in files):
-            print("No files selected")
+            app.logger.warning("No files selected")
             return jsonify({'error': 'No files selected'}), 400
+
+        # Validate file size
+        for file in files:
+            if file and file.filename:
+                file.seek(0, os.SEEK_END)
+                size = file.tell()
+                file.seek(0)
+                if size > app.config['MAX_CONTENT_LENGTH']:
+                    app.logger.warning(f"File {file.filename} exceeds size limit")
+                    return jsonify({'error': f'File {file.filename} exceeds maximum size limit of {app.config["MAX_CONTENT_LENGTH"] // (1024*1024)}MB'}), 413
 
         uploaded_files = []
         errors = []
         parsed_data_list = []
         
-        print(f"Processing {len(files)} files")
+        app.logger.info(f"Processing {len(files)} files")
         
         for file in files:
             if file and file.filename and allowed_file(file.filename):
                 try:
                     filename = secure_filename(file.filename)
-                    print(f"Processing file: {filename}")
+                    app.logger.info(f"Processing file: {filename}")
                     
-                    # Read file content
-                    file_content = file.read()
-                    file_stream = io.BytesIO(file_content)
-                    
-                    # Process PDF
-                    reader = PyPDF2.PdfReader(file_stream)
-                    pdf_text = "".join(page.extract_text() for page in reader.pages)
-                    
-                    # Reset file stream for extract_info_from_pdf
-                    file_stream.seek(0)
-                    
-                    # Extract information
-                    (company_name, customer, order_date, sales_person, rq_invoice, 
-                     total_price, accessories_prices, upgrades_count, activations_count, 
-                     ppp_present, pairs, activation_fee_sum) = extract_info_from_pdf(file_stream)
-                    
-                    parsed_data = {
-                        'filename': filename,
-                        'company_name': company_name,
-                        'customer': customer,
-                        'order_date': order_date,
-                        'sales_person': sales_person,
-                        'rq_invoice': rq_invoice,
-                        'total_price': total_price,
-                        'accessories_prices': accessories_prices,
-                        'upgrades_count': upgrades_count,
-                        'activations_count': activations_count,
-                        'ppp_present': ppp_present,
-                        'activation_fee_sum': activation_fee_sum,
-                        'imei_iccid_pairs': pairs,
-                        'pdf_text': pdf_text
-                    }
-                    
-                    parsed_data_list.append(parsed_data)
-                    uploaded_files.append(filename)
-                    print(f"Successfully processed {filename}")
-                    
+                    # Validate file content
+                    try:
+                        file_content = file.read()
+                        if not file_content:
+                            raise ValueError("Empty file")
+                            
+                        file_stream = io.BytesIO(file_content)
+                        
+                        # Validate PDF format
+                        try:
+                            reader = PyPDF2.PdfReader(file_stream)
+                            if len(reader.pages) == 0:
+                                raise ValueError("PDF has no pages")
+                                
+                            pdf_text = "".join(page.extract_text() for page in reader.pages)
+                            if not pdf_text.strip():
+                                raise ValueError("PDF contains no text")
+                                
+                            # Reset file stream for extract_info_from_pdf
+                            file_stream.seek(0)
+                            
+                            # Extract information with validation
+                            result = extract_info_from_pdf(file_stream)
+                            if not all(result):
+                                raise ValueError("Failed to extract required information from PDF")
+                                
+                            (company_name, customer, order_date, sales_person, rq_invoice, 
+                             total_price, accessories_prices, upgrades_count, activations_count, 
+                             ppp_present, pairs, activation_fee_sum) = result
+                            
+                            parsed_data = {
+                                'filename': filename,
+                                'company_name': company_name,
+                                'customer': customer,
+                                'order_date': order_date,
+                                'sales_person': sales_person,
+                                'rq_invoice': rq_invoice,
+                                'total_price': total_price,
+                                'accessories_prices': accessories_prices,
+                                'upgrades_count': upgrades_count,
+                                'activations_count': activations_count,
+                                'ppp_present': ppp_present,
+                                'activation_fee_sum': activation_fee_sum,
+                                'imei_iccid_pairs': pairs,
+                                'pdf_text': pdf_text
+                            }
+                            
+                            parsed_data_list.append(parsed_data)
+                            uploaded_files.append(filename)
+                            app.logger.info(f"Successfully processed {filename}")
+                            
+                        except PyPDF2.PdfReadError as e:
+                            raise ValueError(f"Invalid PDF format: {str(e)}")
+                            
+                    except ValueError as e:
+                        raise ValueError(f"Content validation failed: {str(e)}")
+                        
                 except Exception as e:
-                    print(f"Error processing {file.filename}: {str(e)}")
+                    app.logger.error(f"Error processing {file.filename}: {str(e)}")
                     errors.append(f"Error processing {file.filename}: {str(e)}")
             else:
                 error_msg = f"Invalid file: {file.filename if file.filename else 'No file selected'}"
-                print(error_msg)
+                app.logger.warning(error_msg)
                 errors.append(error_msg)
 
         if not parsed_data_list:
@@ -882,9 +982,14 @@ def upload_pdf():
                 return jsonify({'error': ' | '.join(errors)}), 400
             return jsonify({'error': 'No valid files were processed'}), 400
 
-        # Store the list of parsed data in session
-        session['parsed_data_list'] = parsed_data_list
-        session['current_pdf_index'] = 0
+        # Store the list of parsed data in session with size validation
+        try:
+            session['parsed_data_list'] = parsed_data_list
+            session['current_pdf_index'] = 0
+            session.modified = True
+        except Exception as e:
+            app.logger.error(f"Session storage error: {str(e)}")
+            return jsonify({'error': 'Error storing processed data'}), 500
 
         response_data = {
             'status': 'success',
@@ -892,12 +997,12 @@ def upload_pdf():
             'uploaded': uploaded_files,
             'redirect': url_for('confirm_receipt')
         }
-        print("Sending response:", response_data)
+        app.logger.info(f"Upload complete: {response_data}")
         return jsonify(response_data)
         
     except Exception as e:
-        print(f"Unexpected error: {str(e)}")
-        return jsonify({'error': str(e)}), 500
+        app.logger.error(f"Unexpected error in upload: {str(e)}")
+        return jsonify({'error': 'An unexpected error occurred during upload'}), 500
     
 @app.route('/confirm', methods=['GET', 'POST'])
 def confirm_receipt():
