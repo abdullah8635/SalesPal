@@ -550,6 +550,8 @@ def login():
                 return redirect(url_for('login'))
                 
             with db.cursor() as cursor:
+                app.logger.info(f"Login attempt for username: {username}")
+                
                 cursor.execute("""
                     SELECT id, name, email, phone, username, password, approved, is_admin 
                     FROM users 
@@ -572,16 +574,17 @@ def login():
                             
                             # Set session parameters for security
                             session.permanent = True
-                            app.permanent_session_lifetime = timedelta(hours=1)  # Set session lifetime
+                            app.permanent_session_lifetime = timedelta(hours=1)
                             session.modified = True
                             
-                            # Set session data with validation
+                            # Set session data with validation - MOVED OUTSIDE THE IF BLOCK
+                            session['logged_in'] = True
+                            session['username'] = username
+                            session['user_id'] = int(user_data[0])
                             
+                            # Set admin flag only if user is admin
                             if user_data[7] == 1:
                                 session['admin'] = True
-                                session['logged_in'] = True
-                                session['username'] = username
-                                session['user_id'] = int(user_data[0])
                             
                             # Log in the user with Flask-Login
                             login_user(user, 
@@ -596,7 +599,7 @@ def login():
                             return redirect(url_for('non_admin_dashboard'))
                             
                         except Exception as e:
-                            session.clear()  # Clear session on error
+                            session.clear()
                             app.logger.error(f"Session error during login: {str(e)}")
                             flash("Error during login process", "error")
                             return redirect(url_for('login'))
@@ -615,7 +618,6 @@ def login():
             if 'db' in locals():
                 db.close()
     
-    # For GET requests, ensure no lingering session data
     if request.method == 'GET':
         session.clear()
     return render_template('login.html')
