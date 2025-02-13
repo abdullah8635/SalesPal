@@ -26,20 +26,48 @@ from logging.handlers import RotatingFileHandler
 
 app = Flask(__name__)
 
+app.secret_key = 'your_secret_key'
+app.permanent_session_lifetime = timedelta(minutes=60)
+app.config['SESSION_COOKIE_SECURE'] = True  # For HTTPS
+app.config['SESSION_COOKIE_HTTPONLY'] = True
+app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
+
+app.config['DB_HOST'] = 'localhost'
+app.config['DB_NAME'] = 'salespal'
+app.config['DB_USER'] = 'yourusername'
+app.config['DB_PASSWORD'] = 'yourpassword'  # Make sure this is correct
+
+db_pool = SimpleConnectionPool(
+    minconn=1,
+    maxconn=10,
+    host=app.config['DB_HOST'],
+    database=app.config['DB_NAME'],
+    user=app.config['DB_USER'],
+    password=app.config['DB_PASSWORD']
+)
+
 def get_db():
     try:
-        print("Attempting to connect to database...")
-        connection = psycopg2.connect(
-            host=app.config['DB_HOST'],
-            database=app.config['DB_NAME'],
-            user=app.config['DB_USER'],
-            password=app.config['DB_PASSWORD']
-        )
-        print("Database connection successful")
-        return connection
-    except psycopg2.Error as e:
-        app.logger.error(f"Database connection error: {e}")
+        return db_pool.getconn()
+    except Exception as e:
+        app.logger.error(f"Failed to get database connection: {e}")
         return None
+
+def return_db(conn):
+    db_pool.putconn(conn)
+    
+@app.teardown_appcontext
+def close_connection(exception):
+    """Ensure database connections are closed at the end of each request"""
+    db = g.pop('db', None)
+    if db is not None:
+        try:
+            db.close()
+            app.logger.debug("Database connection closed")
+        except Exception as e:
+            app.logger.error(f"Error closing database connection: {e}")
+            # Even if close fails, remove the reference
+            db = None    
         
 def create_admin_user():
     try:
@@ -72,18 +100,8 @@ def create_admin_user():
 
 # Call this function when the app starts
 with app.app_context():
+    init_db()
     create_admin_user()
-
-app.secret_key = 'your_secret_key'
-app.permanent_session_lifetime = timedelta(minutes=60)
-app.config['SESSION_COOKIE_SECURE'] = True  # For HTTPS
-app.config['SESSION_COOKIE_HTTPONLY'] = True
-app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'
-
-app.config['DB_HOST'] = 'localhost'
-app.config['DB_NAME'] = 'salespal'
-app.config['DB_USER'] = 'yourusername'
-app.config['DB_PASSWORD'] = 'yourpassword'  # Make sure this is correct
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
@@ -112,24 +130,7 @@ class User(UserMixin):
     def get_id(self):
         return self.id
 
-db_pool = SimpleConnectionPool(
-    minconn=1,
-    maxconn=10,
-    host=app.config['DB_HOST'],
-    database=app.config['DB_NAME'],
-    user=app.config['DB_USER'],
-    password=app.config['DB_PASSWORD']
-)
 
-def get_db():
-    try:
-        return db_pool.getconn()
-    except Exception as e:
-        app.logger.error(f"Failed to get database connection: {e}")
-        return None
-
-def return_db(conn):
-    db_pool.putconn(conn)
 
 # User loader callback
 @login_manager.user_loader
@@ -455,18 +456,7 @@ def round_up(value, decimals=2):
     return math.ceil(value * factor) / factor
 
 # Close the database connection at the end of each request
-@app.teardown_appcontext
-def close_connection(exception):
-    """Ensure database connections are closed at the end of each request"""
-    db = g.pop('db', None)
-    if db is not None:
-        try:
-            db.close()
-            app.logger.debug("Database connection closed")
-        except Exception as e:
-            app.logger.error(f"Error closing database connection: {e}")
-            # Even if close fails, remove the reference
-            db = None
+
 
 @app.route('/admin/pending_accounts')
 def pending_accounts():
