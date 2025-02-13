@@ -145,99 +145,83 @@ def init_db():
     db = None
     try:
         db = get_db()
-        cursor = db.cursor()
-        
-        # Explicitly set search path to public schema
-        cursor.execute('SET search_path TO public')
+        if db is None:
+            app.logger.error("Could not establish database connection")
+            return
+            
+        with db.cursor() as cursor:
+            # Explicitly set search path to public schema
+            cursor.execute('SET search_path TO public')
 
-        # Create users table first
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                name VARCHAR(255) UNIQUE NOT NULL,
-                email VARCHAR(255) UNIQUE NOT NULL,
-                phone VARCHAR(20) UNIQUE NOT NULL,
-                username VARCHAR(50) UNIQUE,
-                password TEXT,
-                approved INTEGER DEFAULT 0,
-                is_admin INTEGER DEFAULT 0,
-                rejected INTEGER DEFAULT 0
-            );
-        ''')
+            # Create users table first
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    name VARCHAR(255) UNIQUE NOT NULL,
+                    email VARCHAR(255) UNIQUE NOT NULL,
+                    phone VARCHAR(20) UNIQUE NOT NULL,
+                    username VARCHAR(50) UNIQUE,
+                    password TEXT,
+                    approved INTEGER DEFAULT 0,
+                    is_admin INTEGER DEFAULT 0,
+                    rejected INTEGER DEFAULT 0
+                );
+            ''')
 
-        # Create parsed_receipts table
-        cursor.execute('''
-            CREATE TABLE IF NOT EXISTS parsed_receipts (
-                id SERIAL PRIMARY KEY,
-                company_name TEXT,
-                customer TEXT,
-                order_date TEXT,
-                sales_person TEXT,
-                rq_invoice TEXT,
-                total_price REAL,
-                accessory_prices TEXT,
-                upgrades_count INTEGER,
-                activations_count INTEGER,
-                ppp_present BOOLEAN,
-                activation_fee_sum REAL,
-                user_id INTEGER,
-                date_submitted TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                imei_iccid_pairs TEXT,
-                FOREIGN KEY(user_id) REFERENCES users(id)
-            );
-        ''')
+            # Create parsed_receipts table
+            cursor.execute('''
+                CREATE TABLE IF NOT EXISTS parsed_receipts (
+                    id SERIAL PRIMARY KEY,
+                    company_name TEXT,
+                    customer TEXT,
+                    order_date TEXT,
+                    sales_person TEXT,
+                    rq_invoice TEXT,
+                    total_price REAL,
+                    accessory_prices TEXT,
+                    upgrades_count INTEGER,
+                    activations_count INTEGER,
+                    ppp_present BOOLEAN,
+                    activation_fee_sum REAL,
+                    user_id INTEGER,
+                    date_submitted TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    imei_iccid_pairs TEXT,
+                    FOREIGN KEY(user_id) REFERENCES users(id)
+                );
+            ''')
 
-        # Commit all changes
-        db.commit()
-        print("Database tables created successfully")
+            # Check if admin user exists
+            cursor.execute("SELECT * FROM users WHERE username = 'admin'")
+            admin_exists = cursor.fetchone()
+            
+            # Create default admin if it doesn't exist
+            if not admin_exists:
+                admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
+                cursor.execute('''
+                    INSERT INTO users (name, email, phone, username, password, approved, is_admin)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
+
+            # Commit all changes
+            db.commit()
+            app.logger.info("Database tables and admin user created successfully")
 
     except Exception as e:
-        print(f"Detailed error in init_db: {type(e).__name__}")
-        print(f"Error message: {e}")
+        app.logger.error(f"Detailed error in init_db: {type(e).__name__}")
+        app.logger.error(f"Error message: {e}")
         if db:
             db.rollback()
         raise  # Re-raise to see full traceback
     finally:
-        if 'cursor' in locals():
-            cursor.close()
         if db:
             db.close()
-        
+
 ALLOWED_EXTENSIONS = {'pdf'}
+
 def allowed_file(filename):
     """Check if the uploaded file has an allowed extension"""
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
-
-try:
-    db = get_db()
-    if db is None:
-        app.logger.error("Could not establish database connection")
-        return "Database connection error", 500
-
-    with db.cursor() as cursor:
-        # Check if admin user exists
-        cursor.execute("SELECT * FROM users WHERE username = 'admin'")
-        admin_exists = cursor.fetchone()
-        
-        # Create default admin if it doesn't exist
-        if not admin_exists:
-            admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
-            cursor.execute('''
-                INSERT INTO users (name, email, phone, username, password, approved, is_admin)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
-            ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
-            db.commit()
-            app.logger.info("Default admin user created")
-
-except Exception as e:
-    if db:
-        db.rollback()
-    app.logger.error(f"Error setting up admin user: {str(e)}")
-    raise
-finally:
-    if 'db' in locals():
-        db.close()
 
 @app.route('/api/update_receipt/<string:rq_invoice>', methods=['POST'])
 @login_required
