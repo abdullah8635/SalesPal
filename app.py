@@ -1,6 +1,7 @@
 from flask import Flask, request, session, flash, redirect, url_for, render_template, g, json, jsonify
 import re
 import traceback
+import sys
 from flask_bcrypt import Bcrypt
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -677,23 +678,31 @@ def generate_random_password(length, include_special_chars=False):
 @app.route('/', methods=['GET', 'POST'])
 @limiter.limit("20 per minute")
 def login():
+    print("=" * 50)
+    print("LOGIN ROUTE ACCESSED")
+    print("=" * 50)
+    
+    # Log request details
+    print(f"Request Method: {request.method}")
+    
     if request.method == 'POST':
-        username = request.form['username']
-        password = request.form['password']
-        db = None
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        
+        # Detailed input logging
+        print(f"Username Attempted: {username}")
+        print(f"Password Length: {len(password)}")
         
         try:
-            # Log detailed login attempt
-            app.logger.info(f"Login attempt - Username: {username}")
-            
+            # Database connection
             db = get_db()
             if db is None:
-                app.logger.error("Could not establish database connection")
-                flash("Login service temporarily unavailable", "error")
-                return redirect(url_for('login'))
-                
+                print("CRITICAL: Database connection failed")
+                flash("Database connection error", "error")
+                return render_template('login.html')
+            
             with db.cursor() as cursor:
-                # Execute query with detailed logging
+                # Execute query to find user
                 cursor.execute("""
                     SELECT id, name, email, phone, username, password, approved, is_admin 
                     FROM users 
@@ -701,110 +710,117 @@ def login():
                 """, (username,))
                 user_data = cursor.fetchone()
                 
-                # Log query results for debugging
+                # Detailed user search logging
                 if user_data:
-                    app.logger.info(f"User found - ID: {user_data[0]}, Name: {user_data[1]}")
-                    app.logger.info(f"User details - Approved: {user_data[6]}, Is Admin: {user_data[7]}")
-                    
-                    # Detailed password verification logging
-                    password_match = bcrypt.check_password_hash(user_data[5], password)
-                    app.logger.info(f"Password verification result: {password_match}")
+                    print("=" * 50)
+                    print("USER FOUND IN DATABASE:")
+                    print(f"User ID: {user_data[0]}")
+                    print(f"Username: {user_data[4]}")
+                    print(f"Approved Status: {user_data[6]}")
+                    print(f"Is Admin: {user_data[7]}")
+                    print("=" * 50)
                 else:
-                    app.logger.warning(f"No user found with username: {username}")
+                    print("NO USER FOUND with username: " + username)
                 
-                # Comprehensive authentication check
-                if user_data and password_match:
-                    # Check approval status
-                    if user_data[6] == 1:  # approved status
-                        try:
-                            # Create User object
-                            user = User(
-                                id=user_data[0],
-                                name=user_data[1],
-                                is_admin=user_data[7]
-                            )
-                            
-                            # Clear existing session
-                            session.clear()
-                            
-                            # Set session parameters
-                            session.permanent = True
-                            app.permanent_session_lifetime = timedelta(hours=1)
-                            session.modified = True
-                            
-                            # Set comprehensive session data
-                            session['logged_in'] = True
-                            session['username'] = username
-                            session['user_id'] = int(user_data[0])
-                            
-                            # Set admin flag
-                            is_admin = user_data[7] == 1
-                            if is_admin:
-                                session['admin'] = True
-                            
-                            # Detailed login logging
-                            app.logger.info(f"Successful login for {username}")
-                            app.logger.info(f"User admin status: {is_admin}")
-                            
-                            # Login user with Flask-Login
-                            login_user(user, 
-                                     remember=True, 
-                                     duration=timedelta(hours=1))
-                            
-                            # Regenerate session ID
-                            session.regenerate()
-                            
-                            # Redirect based on admin status with logging
-                            if is_admin:
-                                app.logger.info(f"Redirecting admin {username} to admin home")
-                                return redirect(url_for('admin_home'))
-                            else:
-                                app.logger.info(f"Redirecting user {username} to non-admin dashboard")
-                                return redirect(url_for('non_admin_dashboard'))
-                            
-                        except Exception as e:
-                            # Comprehensive error logging
-                            app.logger.error(f"Login process error: {e}")
-                            app.logger.error(f"Traceback: {traceback.format_exc()}")
-                            
-                            session.clear()
-                            flash("Unexpected error during login", "error")
-                            return redirect(url_for('login'))
-                    else:
-                        app.logger.warning(f"Login attempt for unapproved user: {username}")
-                        flash("Your account is pending approval. Please contact an administrator.", "error")
-                        return redirect(url_for('login'))
+                # Password verification
+                if user_data:
+                    try:
+                        # Verify password
+                        is_password_correct = bcrypt.check_password_hash(user_data[5], password)
+                        print(f"Password Verification Result: {is_password_correct}")
+                    except Exception as hash_error:
+                        print("PASSWORD HASH ERROR:")
+                        print(traceback.format_exc())
+                        is_password_correct = False
                 else:
-                    app.logger.warning(f"Failed login attempt for username: {username}")
+                    is_password_correct = False
+                
+                # Authentication logic
+                if user_data and is_password_correct:
+                    # Check if user is approved
+                    if user_data[6] == 1:  # Approved
+                        # Clear existing session
+                        session.clear()
+                        
+                        # Set session variables
+                        session['logged_in'] = True
+                        session['username'] = username
+                        session['user_id'] = user_data[0]
+                        
+                        # Set admin flag if applicable
+                        if user_data[7] == 1:
+                            session['admin'] = True
+                            print("Redirecting to ADMIN home")
+                            return redirect(url_for('admin_home'))
+                        else:
+                            print("Redirecting to NON-ADMIN dashboard")
+                            return redirect(url_for('non_admin_dashboard'))
+                    else:
+                        print("User not approved")
+                        flash("Your account is not approved", "error")
+                else:
+                    print("Authentication FAILED")
                     flash("Invalid username or password", "error")
-                    return redirect(url_for('login'))
-                    
+                
+                # Always return to login page if authentication fails
+                return render_template('login.html')
+        
         except Exception as e:
-            # Catch-all error logging
-            app.logger.error(f"Unexpected login error: {e}")
-            app.logger.error(f"Traceback: {traceback.format_exc()}")
-            
-            flash("An unexpected error occurred. Please try again.", "error")
-            return redirect(url_for('login'))
-        finally:
-            # Ensure database connection is closed
-            if db:
-                return_db(db)
+            print("UNEXPECTED LOGIN ERROR:")
+            print(traceback.format_exc())
+            flash("An unexpected error occurred", "error")
+            return render_template('login.html')
     
-    # Clear session on GET request
-    if request.method == 'GET':
-        session.clear()
-    
+    # GET request handling
     return render_template('login.html')
 # Home route
+
+def reset_user_password(username, new_password):
+    db = get_db()
+    try:
+        with db.cursor() as cursor:
+            # Hash the new password
+            hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+            
+            # Update user password and ensure approved
+            cursor.execute("""
+                UPDATE users 
+                SET password = %s, approved = 1, is_admin = 1
+                WHERE username = %s
+            """, (hashed_password, username))
+            
+            db.commit()
+            print(f"Password reset for user: {username}")
+            print(f"Hashed Password: {hashed_password}")
+    except Exception as e:
+        print(f"Password reset error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+# Example usage (run in Python console)
+reset_user_password('hello', 'newpassword123')
+
 @app.route('/home')
+@login_required  # Ensure user is logged in
 def home():
-    if 'logged_in' in session:
+    try:
+        # Debugging print statements
+        print("Home route accessed")
+        print(f"Session contents: {dict(session)}")
+        
         # Check if the user is an admin
-        if 'admin' in session:
-            return redirect(url_for('employee_list'))  # Redirect admins to the employee list
-        return redirect(url_for('upload_pdf'))  # Redirect regular users to the PDF upload page
-    else:
+        if session.get('admin', False):
+            print("Redirecting admin to employee list")
+            return redirect(url_for('employee_list'))
+        else:
+            print("Redirecting non-admin to upload PDF")
+            return redirect(url_for('upload_pdf'))
+    
+    except Exception as e:
+        # Log any unexpected errors
+        app.logger.error(f"Error in home route: {e}")
+        flash("An error occurred", "error")
         return redirect(url_for('login'))
 
 @app.route('/admin/home')
