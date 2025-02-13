@@ -26,7 +26,12 @@ import logging
 from logging.handlers import RotatingFileHandler
 
 app = Flask(__name__)
-logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG, 
+                    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    handlers=[
+                        logging.FileHandler('app_debug.log'),
+                        logging.StreamHandler()
+                    ])
 
 app.config.update(
     SECRET_KEY=os.urandom(24),  # Cryptographically secure random key
@@ -52,14 +57,26 @@ db_pool = SimpleConnectionPool(
 
 def get_db():
     try:
-        return db_pool.getconn()
+        # Log connection attempt
+        app.logger.debug("Attempting to get database connection from pool")
+        connection = db_pool.getconn()
+        
+        # Optional: Verify connection is valid
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+        
+        return connection
     except Exception as e:
         app.logger.error(f"Failed to get database connection: {e}")
         return None
 
 def return_db(conn):
     if conn:
-        db_pool.putconn(conn)
+        try:
+            db_pool.putconn(conn)
+            app.logger.debug("Connection returned to pool successfully")
+        except Exception as e:
+            app.logger.error(f"Error returning connection to pool: {e}")
         
 def init_db():
     db = None
@@ -107,6 +124,18 @@ def init_db():
                     FOREIGN KEY(user_id) REFERENCES users(id)
                 );
             ''')
+            
+            # Check if admin user exists before creating
+            cursor.execute("SELECT * FROM users WHERE username = 'admin'")
+            admin_exists = cursor.fetchone()
+            
+            if not admin_exists:
+                # Create default admin user
+                admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
+                cursor.execute('''
+                    INSERT INTO users (name, email, phone, username, password, approved, is_admin)
+                    VALUES (%s, %s, %s, %s, %s, %s, %s)
+                ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
             
             db.commit()
             app.logger.info("Database tables created successfully")
@@ -235,7 +264,21 @@ limiter = Limiter(
 
 @app.errorhandler(Exception)
 def handle_exception(e):
-    app.logger.error(f"Unhandled exception: {str(e)}")
+    # Log the full stack trace
+    app.logger.error('Unhandled exception', exc_info=True)
+    
+    # Log additional context
+    app.logger.error(f"Exception Type: {type(e).__name__}")
+    app.logger.error(f"Exception Details: {str(e)}")
+    
+    # Optional: Log request details
+    try:
+        app.logger.error(f"Request Method: {request.method}")
+        app.logger.error(f"Request URL: {request.url}")
+        app.logger.error(f"Request Headers: {request.headers}")
+    except:
+        pass
+    
     return "Internal server error", 500
 
 @app.errorhandler(429)
@@ -253,20 +296,6 @@ except Exception as e:
 DATABASE = '/data/users.db'
 os.makedirs('/home/ubuntu/SalesPal/data', exist_ok=True)  # Create the directory if it doesn't exist
 
-def get_db():
-    try:
-        print("Attempting to connect to database...")
-        connection = psycopg2.connect(
-            host=app.config['DB_HOST'],
-            database=app.config['DB_NAME'],
-            user=app.config['DB_USER'],
-            password=app.config['DB_PASSWORD']
-        )
-        print("Database connection successful")
-        return connection
-    except psycopg2.Error as e:
-        app.logger.error(f"Database connection error: {e}")
-        return None 
 
 def init_db():
     db = None
