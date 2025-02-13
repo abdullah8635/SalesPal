@@ -26,6 +26,7 @@ import logging
 from logging.handlers import RotatingFileHandler
 
 app = Flask(__name__)
+logging.basicConfig(level=logging.DEBUG)
 
 app.config.update(
     SECRET_KEY=os.urandom(24),  # Cryptographically secure random key
@@ -200,6 +201,13 @@ def handle_500(e):
     # Log the full traceback
     app.logger.error('An error occurred during a request.')
     app.logger.error(traceback.format_exc())
+    
+    # Optional: Log additional context
+    app.logger.error(f"Exception: {str(e)}")
+    app.logger.error(f"Request method: {request.method}")
+    app.logger.error(f"Request URL: {request.url}")
+    app.logger.error(f"Request data: {request.get_data()}")
+    
     return "Internal Server Error", 500
     
 # User loader callback
