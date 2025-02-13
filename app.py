@@ -79,17 +79,23 @@ def return_db(conn):
             app.logger.error(f"Error returning connection to pool: {e}")
         
 def init_db():
+    """
+    Initialize database tables and create admin user if not exists.
+    Handles database connection, table creation, and admin user setup.
+    """
     db = None
     try:
+        # Attempt to get a database connection
         db = get_db()
         if db is None:
             app.logger.error("Could not establish database connection")
-            return
-            
+            return False
+        
         with db.cursor() as cursor:
-            # Create tables and admin user
+            # Explicitly set search path to public schema
             cursor.execute('SET search_path TO public')
             
+            # Create users table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
@@ -104,6 +110,7 @@ def init_db():
                 );
             ''')
             
+            # Create parsed_receipts table
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS parsed_receipts (
                     id SERIAL PRIMARY KEY,
@@ -125,26 +132,45 @@ def init_db():
                 );
             ''')
             
-            # Check if admin user exists before creating
+            # Check if admin user exists
             cursor.execute("SELECT * FROM users WHERE username = 'admin'")
             admin_exists = cursor.fetchone()
             
+            # Create default admin if it doesn't exist
             if not admin_exists:
-                # Create default admin user
-                admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
+                # Use a more secure default password generation
+                import secrets
+                default_password = secrets.token_urlsafe(12)  # Generate a more secure random password
+                
+                admin_password = bcrypt.generate_password_hash(default_password).decode('utf-8')
                 cursor.execute('''
                     INSERT INTO users (name, email, phone, username, password, approved, is_admin)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
+                
+                # Log the generated password securely
+                app.logger.info("Admin user created. Please change the default password.")
+                print(f"IMPORTANT: Default admin password is: {default_password}")
             
+            # Commit all changes
             db.commit()
-            app.logger.info("Database tables created successfully")
-            
+            app.logger.info("Database tables and admin user created successfully")
+            return True
+    
     except Exception as e:
-        app.logger.error(f"Database initialization error: {str(e)}")
+        # Comprehensive error logging
+        app.logger.error(f"Database initialization error: {type(e).__name__}")
+        app.logger.error(f"Error details: {str(e)}")
+        app.logger.error(f"Error traceback: {traceback.format_exc()}")
+        
+        # Rollback in case of any error
         if db:
             db.rollback()
+        
+        return False
+    
     finally:
+        # Ensure database connection is properly closed
         if db:
             return_db(db)
             
@@ -192,7 +218,10 @@ def create_admin_user():
 
 # Call this function when the app starts
 with app.app_context():
-    init_db()
+    if init_db():
+        app.logger.info("Database initialized successfully")
+    else:
+        app.logger.error("Failed to initialize database")
     create_admin_user()
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
