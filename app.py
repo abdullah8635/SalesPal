@@ -603,6 +603,7 @@ def login():
     if request.method == 'POST':
         username = request.form['username']
         password = request.form['password']
+        db = None
         
         try:
             db = get_db()
@@ -657,7 +658,7 @@ def login():
                             session.regenerate()
                             
                             if user_data[7] == 1:
-                                return redirect(url_for(''))
+                                return redirect(url_for('admin_home'))
                             return redirect(url_for('non_admin_dashboard'))
                             
                         except Exception as e:
@@ -677,8 +678,8 @@ def login():
             flash("Login service temporarily unavailable", "error")
             return redirect(url_for('login'))
         finally:
-            if 'db' in locals():
-                db.close()
+            if db:
+                return_db(db)
     
     if request.method == 'GET':
         session.clear()
