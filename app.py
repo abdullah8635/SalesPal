@@ -209,6 +209,17 @@ def allowed_file(filename):
     return '.' in filename and \
            filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
 
+        # Check if admin user exists
+cursor.execute("SELECT * FROM users WHERE username = 'admin'")
+admin_exists = cursor.fetchone()
+        # Create default admin if it doesn't exist
+if not admin_exists:
+    admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
+    cursor.execute('''
+        INSERT INTO users (name, email, phone, username, password, approved, is_admin)
+        VALUES (%s, %s, %s, %s, %s, %s, %s)
+    ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
+
 @app.route('/api/update_receipt/<string:rq_invoice>', methods=['POST'])
 @login_required
 def update_receipt_details(rq_invoice):
