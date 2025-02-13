@@ -26,8 +26,21 @@ from logging.handlers import RotatingFileHandler
 
 app = Flask(__name__)
 
-# Add this after app = Flask(__name__)
-
+def get_db():
+    try:
+        print("Attempting to connect to database...")
+        connection = psycopg2.connect(
+            host=app.config['DB_HOST'],
+            database=app.config['DB_NAME'],
+            user=app.config['DB_USER'],
+            password=app.config['DB_PASSWORD']
+        )
+        print("Database connection successful")
+        return connection
+    except psycopg2.Error as e:
+        app.logger.error(f"Database connection error: {e}")
+        return None
+        
 def create_admin_user():
     try:
         db = get_db()
@@ -595,7 +608,7 @@ def login():
                             session.regenerate()
                             
                             if user_data[7] == 1:
-                                return redirect(url_for('admin_home'))
+                                return redirect(url_for(''))
                             return redirect(url_for('non_admin_dashboard'))
                             
                         except Exception as e:
