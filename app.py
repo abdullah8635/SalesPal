@@ -43,13 +43,12 @@ app.config.update(
     PERMANENT_SESSION_LIFETIME=timedelta(minutes=60),
     SESSION_COOKIE_SECURE=True,  # Ensure HTTPS
     SESSION_COOKIE_HTTPONLY=True,  # Prevent JavaScript access
-    SESSION_COOKIE_SAMESITE='Lax',  # CSRF protection
+    SESSION_COOKIE_SAMESITE='Lax', 
+    DB_HOST = 'localhost',
+    DB_NAME = 'salespal',
+    DB_USER = 'yourusername',
+    DB_PASSWORD = 'yourpassword'  # CSRF protection
 )
-
-app.config['DB_HOST'] = 'localhost'
-app.config['DB_NAME'] = 'salespal'
-app.config['DB_USER'] = 'yourusername'
-app.config['DB_PASSWORD'] = 'yourpassword'  # Make sure this is correct
 
 db_pool = SimpleConnectionPool(
     minconn=1,
@@ -60,6 +59,46 @@ db_pool = SimpleConnectionPool(
     password=app.config['DB_PASSWORD']
 )
 
+bcrypt = Bcrypt(app)
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    storage_uri="redis://localhost:6379",
+    default_limits=["200 per day", "1000 per hour"]
+)
+
+@app.errorhandler(500)
+def handle_500(e):
+    # Log the full traceback
+    app.logger.error('An error occurred during a request.')
+    app.logger.error(traceback.format_exc())
+    
+    # Optional: Log additional context
+    app.logger.error(f"Exception: {str(e)}")
+    app.logger.error(f"Request method: {request.method}")
+    app.logger.error(f"Request URL: {request.url}")
+    app.logger.error(f"Request data: {request.get_data()}")
+    
+    return "Internal Server Error", 500
+
+@app.errorhandler(Exception)
+def handle_exception(e):
+    # Log the full stack trace
+    app.logger.error('Unhandled exception', exc_info=True)   
+
+@app.errorhandler(429)
+def ratelimit_handler(e):
+    return jsonify(error="Rate limit exceeded. Please try again later."), 429
+
+class User(UserMixin):
+    def __init__(self, id, name, is_admin):
+        self.id = str(id)  # Flask-Login needs string ID
+        self.name = name
+        self.is_admin = is_admin
+
+    def get_id(self):
+        return self.id
+      
 def get_db():
     try:
         # Log connection attempt
@@ -84,10 +123,6 @@ def return_db(conn):
             app.logger.error(f"Error returning connection to pool: {e}")
         
 def init_db():
-    """
-    Initialize database tables and create admin user if not exists.
-    Handles database connection, table creation, and admin user setup.
-    """
     db = None
     try:
         # Attempt to get a database connection
@@ -139,25 +174,13 @@ def init_db():
             
             # Check if admin user exists
             cursor.execute("SELECT * FROM users WHERE username = 'admin'")
-            admin_exists = cursor.fetchone()
-            
-            # Create default admin if it doesn't exist
-            if not admin_exists:
-                # Use a more secure default password generation
-                import secrets
-                default_password = secrets.token_urlsafe(12)  # Generate a more secure random password
-                
-                admin_password = bcrypt.generate_password_hash(default_password).decode('utf-8')
+            if not cursor.fetchone():
+                default_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
                 cursor.execute('''
                     INSERT INTO users (name, email, phone, username, password, approved, is_admin)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
+                ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', default_password, 1, 1))
                 
-                # Log the generated password securely
-                app.logger.info("Admin user created. Please change the default password.")
-                print(f"IMPORTANT: Default admin password is: {default_password}")
-            
-            # Commit all changes
             db.commit()
             app.logger.info("Database tables and admin user created successfully")
             return True
@@ -171,11 +194,9 @@ def init_db():
         # Rollback in case of any error
         if db:
             db.rollback()
-        
         return False
     
     finally:
-        # Ensure database connection is properly closed
         if db:
             return_db(db)
             
@@ -188,38 +209,7 @@ def close_connection(exception):
             app.logger.debug("Database connection closed")
         except Exception as e:
             app.logger.error(f"Error closing database connection: {e}")
-            # Even if close fails, remove the reference
-                
-        
-def create_admin_user():
-    db = None
-    try:
-        db = get_db()
-        if db is None:
-            app.logger.error("Could not establish database connection")
-            return
-            
-        with db.cursor() as cursor:
-            # Check if admin user exists
-            cursor.execute("SELECT * FROM users WHERE username = 'admin'")
-            admin_exists = cursor.fetchone()
-            
-            # Create default admin if it doesn't exist
-            if not admin_exists:
-                admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
-                cursor.execute('''
-                    INSERT INTO users (name, email, phone, username, password, approved, is_admin)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
-                db.commit()
-                app.logger.info("Default admin user created")
-    except Exception as e:
-        if db:
-            db.rollback()
-        app.logger.error(f"Error creating admin user: {str(e)}")
-    finally:
-        if db:
-            return_db(db)
+            # Even if close fails, remove the reference              
 
 # Call this function when the app starts
 with app.app_context():
@@ -227,7 +217,6 @@ with app.app_context():
         app.logger.info("Database initialized successfully")
     else:
         app.logger.error("Failed to initialize database")
-    create_admin_user()
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
@@ -235,42 +224,10 @@ app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__fil
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
 
-from flask_login import LoginManager, UserMixin, login_user, login_required, logout_user, current_user
-
 handler = RotatingFileHandler('flask_app.log', maxBytes=10000, backupCount=3)
 handler.setLevel(logging.ERROR)
 app.logger.addHandler(handler)
 
-# Initialize Flask-Login
-
-# Create User class
-class User(UserMixin):
-    def __init__(self, id, name, is_admin):
-        self.id = str(id)  # Flask-Login needs string ID
-        self.name = name
-        self.is_admin = is_admin
-
-    def get_id(self):
-        return self.id
-
-logging.basicConfig(level=logging.DEBUG)
-logging.getLogger().addHandler(logging.StreamHandler())
-
-@app.errorhandler(500)
-def handle_500(e):
-    # Log the full traceback
-    app.logger.error('An error occurred during a request.')
-    app.logger.error(traceback.format_exc())
-    
-    # Optional: Log additional context
-    app.logger.error(f"Exception: {str(e)}")
-    app.logger.error(f"Request method: {request.method}")
-    app.logger.error(f"Request URL: {request.url}")
-    app.logger.error(f"Request data: {request.get_data()}")
-    
-    return "Internal Server Error", 500
-    
-# User loader callback
 @login_manager.user_loader
 def load_user(user_id):
     db = get_db()
@@ -284,20 +241,7 @@ def load_user(user_id):
             is_admin=user[2]
         )
     return None
-    
-bcrypt = Bcrypt(app)
-limiter = Limiter(
-    app=app,
-    key_func=get_remote_address,
-    storage_uri="redis://localhost:6379",
-    default_limits=["200 per day", "1000 per hour"]
-)
 
-@app.errorhandler(Exception)
-def handle_exception(e):
-    # Log the full stack trace
-    app.logger.error('Unhandled exception', exc_info=True)
-    
     # Log additional context
     app.logger.error(f"Exception Type: {type(e).__name__}")
     app.logger.error(f"Exception Details: {str(e)}")
@@ -312,9 +256,6 @@ def handle_exception(e):
     
     return "Internal server error", 500
 
-@app.errorhandler(429)
-def ratelimit_handler(e):
-    return jsonify(error="Rate limit exceeded. Please try again later."), 429
 
 try:
     limiter.storage.storage.ping()
@@ -724,17 +665,15 @@ def login():
                     print("NO USER FOUND with username: " + username)
                 
                 # Password verification
+                is_password_correct = False
                 if user_data:
                     try:
                         # Verify password
                         is_password_correct = bcrypt.check_password_hash(user_data[5], password)
-                        print(f"Password Verification Result: {is_password_correct}")
+                        print(f"Password Verification Result for {username}: {is_password_correct}")
                     except Exception as hash_error:
                         print("PASSWORD HASH ERROR:")
                         print(traceback.format_exc())
-                        is_password_correct = False
-                else:
-                    is_password_correct = False
                 
                 # Authentication logic
                 if user_data and is_password_correct:
@@ -774,7 +713,6 @@ def login():
     
     # GET request handling
     return render_template('login.html')
-# Home route
 
 def reset_user_password(username, new_password):
     db = get_db()
