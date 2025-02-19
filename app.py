@@ -620,98 +620,48 @@ def generate_random_password(length, include_special_chars=False):
 @app.route('/', methods=['GET', 'POST'])
 @limiter.limit("20 per minute")
 def login():
-    print("=" * 50)
-    print("LOGIN ROUTE ACCESSED")
-    print("=" * 50)
-    
-    # Log request details
-    print(f"Request Method: {request.method}")
     
     if request.method == 'POST':
-        username = request.form.get('username', '')
-        password = request.form.get('password', '')
-        
-        # Detailed input logging
-        print(f"Username Attempted: {username}")
-        print(f"Password Length: {len(password)}")
-        
-        try:
-            # Database connection
-            db = get_db()
-            if db is None:
-                print("CRITICAL: Database connection failed")
-                flash("Database connection error", "error")
-                return render_template('login.html')
-            
-            with db.cursor() as cursor:
-                # Execute query to find user
-                cursor.execute("""
-                    SELECT id, name, email, phone, username, password, approved, is_admin 
-                    FROM users 
-                    WHERE username = %s
-                """, (username,))
-                user_data = cursor.fetchone()
-                
-                # Detailed user search logging
-                if user_data:
-                    print("=" * 50)
-                    print("USER FOUND IN DATABASE:")
-                    print(f"User ID: {user_data[0]}")
-                    print(f"Username: {user_data[4]}")
-                    print(f"Approved Status: {user_data[6]}")
-                    print(f"Is Admin: {user_data[7]}")
-                    print("=" * 50)
-                else:
-                    print("NO USER FOUND with username: " + username)
-                
-                # Password verification
-                is_password_correct = False
-                if user_data:
-                    try:
-                        # Verify password
-                        is_password_correct = bcrypt.check_password_hash(user_data[5], password)
-                        print(f"Password Verification Result for {username}: {is_password_correct}")
-                    except Exception as hash_error:
-                        print("PASSWORD HASH ERROR:")
-                        print(traceback.format_exc())
-                
-                # Authentication logic
-                if user_data and is_password_correct:
-                    # Check if user is approved
-                    if user_data[6] == 1:  # Approved
-                        # Clear existing session
-                        session.clear()
-                        
-                        # Set session variables
-                        session['logged_in'] = True
-                        session['username'] = username
-                        session['user_id'] = user_data[0]
-                        
-                        # Set admin flag if applicable
-                        if user_data[7] == 1:
-                            session['admin'] = True
-                            print("Redirecting to ADMIN home")
-                            return redirect(url_for('admin_home'))
-                        else:
-                            print("Redirecting to NON-ADMIN dashboard")
-                            return redirect(url_for('non_admin_dashboard'))
-                    else:
-                        print("User not approved")
-                        flash("Your account is not approved", "error")
-                else:
-                    print("Authentication FAILED")
-                    flash("Invalid username or password", "error")
-                
-                # Always return to login page if authentication fails
-                return render_template('login.html')
-        
-        except Exception as e:
-            print("UNEXPECTED LOGIN ERROR:")
-            print(traceback.format_exc())
-            flash("An unexpected error occurred", "error")
+    username = request.form.get('username', '')
+    password = request.form.get('password', '')
+
+    try:
+        db = get_db()
+        if db is None:
+            flash("Database connection error", "error")
             return render_template('login.html')
+
+        with db.cursor() as cursor:
+            cursor.execute("""
+                SELECT id, name, email, phone, username, password, approved, is_admin 
+                FROM users 
+                WHERE username = %s
+            """, (username,))
+            user_data = cursor.fetchone()
+
+            if user_data:
+                print("User found in database.")
+                is_password_correct = bcrypt.check_password_hash(user_data[5], password)
+                print(f"Password verification for '{username}': {is_password_correct}")
+
+                if is_password_correct and user_data[6] == 1:  # Approved
+                    session.clear()
+                    session['logged_in'] = True
+                    session['username'] = username
+                    session['user_id'] = user_data[0]
+                    if user_data[7] == 1:
+                        return redirect(url_for('admin_home'))
+                    else:
+                        return redirect(url_for('non_admin_dashboard'))
+                else:
+                    flash("Invalid username or password or account not approved", "error")
+            else:
+                flash("Invalid username or password", "error")
+
+    except Exception as e:
+        print("Unexpected login error:", str(e))
+        flash("An unexpected error occurred", "error")
     
-    # GET request handling
     return render_template('login.html')
 
 def reset_user_password(username, new_password):
