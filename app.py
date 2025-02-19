@@ -8,7 +8,6 @@ from flask_limiter.util import get_remote_address
 from limits.storage import RedisStorage
 from datetime import timedelta, datetime
 from typing import List, Dict, Tuple, Optional
-import sqlite3
 import PyPDF2
 import math
 import string
@@ -21,12 +20,17 @@ import io
 from werkzeug.utils import secure_filename
 import psycopg2
 from psycopg2 import errors
+from psycopg2.extras import DictCursor
 from psycopg2.pool import SimpleConnectionPool
 from functools import wraps
 import logging
 from logging.handlers import RotatingFileHandler
 
 app = Flask(__name__)
+login_manager = LoginManager(app)
+login_manager.init_app(app)
+login_manager.login_view = 'login'
+
 logging.basicConfig(level=logging.DEBUG, 
                     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
                     handlers=[
@@ -238,9 +242,6 @@ handler.setLevel(logging.ERROR)
 app.logger.addHandler(handler)
 
 # Initialize Flask-Login
-login_manager = LoginManager()
-login_manager.init_app(app)
-login_manager.login_view = 'login'
 
 # Create User class
 class User(UserMixin):
