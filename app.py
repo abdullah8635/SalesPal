@@ -757,8 +757,11 @@ def admin_home():
 
 # Admin page to list employees and approve/reject accounts
 @app.route('/admin/employees')
+@login_required
 def employee_list():
-    if 'admin' not in session:
+    # Check if the current user is an admin
+    if not current_user.is_admin:
+        flash('Access denied. Admin privileges required.')
         return redirect(url_for('login'))
         
     try:
@@ -773,13 +776,13 @@ def employee_list():
             employees = cursor.fetchall()
             
             # Get current user's name
-            cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
+            cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
             user = cursor.fetchone()
-            current_user = user[0] if user else 'User'
+            current_username = user[0] if user else 'User'
             
         return render_template('employee_list.html', 
                              employees=employees, 
-                             current_user=current_user)
+                             current_user=current_username)
                              
     except Exception as e:
         app.logger.error(f"Error in employee list: {str(e)}")
