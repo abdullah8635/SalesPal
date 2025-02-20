@@ -726,7 +726,7 @@ def home():
         flash("An error occurred", "error")
         return redirect(url_for('login'))
 
-@app.route('/admin/home')
+@app.route('/admin_home')
 def admin_home():
     if 'admin' not in session:
         return redirect(url_for('login'))
