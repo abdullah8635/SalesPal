@@ -472,39 +472,38 @@ def update_device_info(receipt_id):
 @app.route('/non_admin_dashboard')
 @login_required
 def non_admin_dashboard():
-    if 'logged_in' not in session:
-        return redirect(url_for('login'))
+    # Check if the current user is an admin
+    if current_user.is_admin:
+        return redirect(url_for('admin_home'))
     
-    # If the user is not an admin, show them the dashboard with the three boxes
-    if 'admin' not in session:
-        try:
-            username = session.get('username')
-            db = get_db()
+    conn = None
+    try:
+        conn = get_db()
+        if conn is None:
+            app.logger.error("Could not establish database connection")
+            flash('Database connection error', 'error')
+            return render_template('error.html'), 500
+        
+        with conn.cursor() as cursor:
+            # Query to get the user's name using the current user's ID
+            cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
+            user = cursor.fetchone()
             
-            if db is None:
-                app.logger.error("Could not establish database connection")
-                return "Database connection error", 500
-                
-            with db.cursor() as cursor:
-                # Query to get the user's name using the username
-                cursor.execute("SELECT name FROM users WHERE username = %s", (username,))
-                user = cursor.fetchone()
-                
-                if user:
-                    # Pass the name to the template
-                    return render_template('non_admin_dashboard.html', current_user=user[0])
-                else:
-                    # Fallback to username if name not found
-                    return render_template('non_admin_dashboard.html', current_user=username)
-                    
-        except Exception as e:
-            app.logger.error(f"Database error in non_admin_dashboard: {str(e)}")
-            return "An error occurred", 500
-        finally:
-            if 'db' in locals():
-                db.close()
+            if user:
+                # Pass the name to the template
+                return render_template('non_admin_dashboard.html', current_user=user[0])
+            else:
+                # Fallback to username if name not found
+                return render_template('non_admin_dashboard.html', current_user=current_user.name)
     
-    return redirect(url_for('admin_home'))
+    except Exception as e:
+        app.logger.error(f"Database error in non_admin_dashboard: {str(e)}")
+        flash('An error occurred while loading dashboard', 'error')
+        return render_template('error.html'), 500
+    
+    finally:
+        if conn:
+            release_db(conn)
 
 @app.route('/delete_receipt/<int:receipt_id>', methods=['POST'])
 @login_required
