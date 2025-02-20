@@ -617,30 +617,65 @@ def login():
     return render_template('login.html')
   
 def reset_user_password(username, new_password):
-    db = get_db()
     try:
-        with db.cursor() as cursor:
-            # Hash the new password
-            hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
-            
-            # Update user password and ensure approved
-            cursor.execute("""
-                UPDATE users 
-                SET password = %s, approved = 1, is_admin = 1
-                WHERE username = %s
-            """, (hashed_password, username))
-            
-            db.commit()
-            print(f"Password reset for user: {username}")
-            print(f"Hashed Password: {hashed_password}")
+        with get_db_connection() as db:  # Use context manager
+            with db.cursor() as cursor:
+                # First check if user exists
+                cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+                user = cursor.fetchone()
+                
+                if not user:
+                    app.logger.error(f"Password reset failed: User {username} not found")
+                    return False
+                
+                # Hash the new password
+                hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
+                
+                # Update only the password - don't automatically grant admin privileges
+                cursor.execute("""
+                    UPDATE users 
+                    SET password = %s
+                    WHERE username = %s
+                    RETURNING id
+                """, (hashed_password, username))
+                
+                updated = cursor.fetchone()
+                db.commit()
+                
+                if updated:
+                    app.logger.info(f"Password successfully reset for user: {username}")
+                    return True
+                else:
+                    app.logger.error(f"Password reset failed: No rows updated for {username}")
+                    return False
+                    
     except Exception as e:
-        print(f"Password reset error: {e}")
-        db.rollback()
-    finally:
-        db.close()
+        app.logger.error(f"Password reset error: {str(e)}")
+        if 'db' in locals():
+            db.rollback()
+        return False
 
-# Example usage (run in Python console)
-reset_user_password('hello', 'newpassword123')
+# Route with rate limiting
+@app.route('/reset_password', methods=['POST'])
+@limiter.limit("3 per hour")
+@login_required  # If this should only be accessible to logged-in users
+def reset_password_route():
+    try:
+        data = request.get_json()
+        username = data.get('username')
+        new_password = data.get('new_password')
+        
+        if not username or not new_password:
+            return jsonify({'error': 'Missing username or new password'}), 400
+            
+        if reset_user_password(username, new_password):
+            return jsonify({'message': 'Password reset successful'}), 200
+        else:
+            return jsonify({'error': 'Password reset failed'}), 400
+            
+    except Exception as e:
+        app.logger.error(f"Password reset route error: {str(e)}")
+        return jsonify({'error': 'Internal server error'}), 500
 
 @app.route('/home')
 @login_required  # Ensure user is logged in
