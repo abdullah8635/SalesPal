@@ -41,7 +41,7 @@ logging.basicConfig(level=logging.DEBUG,
                     ])
 
 app.config.update(
-    SECRET_KEY=os.urandom(24),  # Cryptographically secure random key
+    SECRET_KEY='hello',  # Cryptographically secure random key
     PERMANENT_SESSION_LIFETIME=timedelta(minutes=60),
     SESSION_COOKIE_SECURE=True,  # Ensure HTTPS
     SESSION_COOKIE_HTTPONLY=True,  # Prevent JavaScript access
@@ -286,30 +286,19 @@ app.logger.addHandler(handler)
 @login_manager.user_loader
 def load_user(user_id):
     try:
-        with get_db_connection() as db:  # Use context manager for connection
-            with db.cursor() as cursor:  # Use context manager for cursor
-                cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (user_id,))
-                user = cursor.fetchone()
-                if user:
-                    return User(
-                        id=user[0],
-                        name=user[1],
-                        is_admin=user[2]
-                    )
-                return None
+        db = get_db()
+        with db.cursor() as cursor:
+            cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (user_id,))
+            user_data = cursor.fetchone()
+            if user_data:
+                return User(
+                    id=user_data[0],
+                    name=user_data[1],
+                    is_admin=user_data[2] == 1
+                )
+        return None
     except Exception as e:
-        # Log the error
-        app.logger.error(f"Exception in load_user: {type(e).__name__}")
-        app.logger.error(f"Exception Details: {str(e)}")
-        
-        # Log request details if available
-        try:
-            app.logger.error(f"Request Method: {request.method}")
-            app.logger.error(f"Request URL: {request.url}")
-            app.logger.error(f"Request Headers: {request.headers}")
-        except:
-            pass
-        
+        logging.error(f"Error loading user: {e}")
         return None  # Return None on error for login_manager
 
 # Redis connection check (separate from user loader)
@@ -600,7 +589,6 @@ def generate_random_password(length, include_special_chars=False):
 @app.route('/', methods=['GET', 'POST'])
 @limiter.limit("20 per minute")
 def login():
-    
     if request.method == 'POST':
         username = request.form.get('username', '')
         password = request.form.get('password', '')
@@ -609,6 +597,7 @@ def login():
             if db is None:
                 flash("Database connection error", "error")
                 return render_template('login.html')
+            
             with db.cursor() as cursor:
                 cursor.execute("""
                     SELECT id, name, email, phone, username, password, approved, is_admin 
@@ -616,22 +605,37 @@ def login():
                     WHERE username = %s
                 """, (username,))
                 user_data = cursor.fetchone()
+                
+                # Add more detailed logging
+                print(f"Username entered: {username}")
+                print(f"User data found: {user_data}")
+                
                 if user_data:
-                    print("User found in database.")
                     is_password_correct = bcrypt.check_password_hash(user_data[5], password)
-                    print(f"Password verification for '{username}': {is_password_correct}")
+                    print(f"Stored hash: {user_data[5]}")
+                    print(f"Password check: {is_password_correct}")
+                    print(f"Approved status: {user_data[6]}")
+                    print(f"Is admin: {user_data[7]}")
+                    
                     if is_password_correct and user_data[6] == 1:  # Approved
-                        session.clear()
-                        session['logged_in'] = True
-                        session['username'] = username
-                        session['user_id'] = user_data[0]
-                        if user_data[7] == 1:
+                        user = User(
+                            id=user_data[0],  # user ID
+                            name=user_data[1],  # assuming name is the second column
+                            is_admin=user_data[7] == 1  # convert to boolean
+                        )
+                        login_user(user)
+                        
+                        if user.is_admin:
+                            print("Redirecting to admin_home")
                             return redirect(url_for('admin_home'))
                         else:
+                            print("Redirecting to non_admin_dashboard")
                             return redirect(url_for('non_admin_dashboard'))
                     else:
+                        print("Login failed: incorrect password or not approved")
                         flash("Invalid username or password or account not approved", "error")
                 else:
+                    print("No user found with this username")
                     flash("Invalid username or password", "error")
         except Exception as e:
             print("Unexpected login error:", str(e))
