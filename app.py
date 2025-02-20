@@ -726,9 +726,12 @@ def home():
         flash("An error occurred", "error")
         return redirect(url_for('login'))
 
-@app.route('/admin_home')
+@app.route('/admin/home')
+@login_required
 def admin_home():
-    if 'admin' not in session:
+    # Check if the current user is an admin
+    if not current_user.is_admin:
+        flash('Access denied. Admin privileges required.')
         return redirect(url_for('login'))
         
     try:
@@ -738,11 +741,12 @@ def admin_home():
             return "Database connection error", 500
             
         with db.cursor() as cursor:
-            cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
+            # Use current_user.id from Flask-Login
+            cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
             user = cursor.fetchone()
-            current_user = user[0] if user else 'User'
+            current_username = user[0] if user else 'User'
             
-        return render_template('admin_home.html', current_user=current_user)
+        return render_template('admin_home.html', current_user=current_username)
         
     except Exception as e:
         app.logger.error(f"Error in admin home: {str(e)}")
