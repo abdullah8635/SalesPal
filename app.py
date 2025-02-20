@@ -136,12 +136,7 @@ class User(UserMixin):
 
     def get_id(self):
         return self.id
-def release_db(conn):
-    if conn:
-        try:
-            CONNECTION_POOL.putconn(conn)
-        except Exception as e:
-            app.logger.error(f"Error releasing database connection: {e}")     
+ 
 def get_db():
     try:
         # Log connection attempt
