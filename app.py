@@ -131,7 +131,6 @@ def init_db():
             return
             
         with db.cursor() as cursor:
-            # Explicitly set search path to public schema
             cursor.execute('SET search_path TO public')
 
             # Create users table first
