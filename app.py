@@ -142,7 +142,7 @@ def return_db(conn):
             app.logger.debug("Connection returned to pool successfully")
         except Exception as e:
             app.logger.error(f"Error returning connection to pool: {str(e)}")
-        
+
 def init_db():
     try:
         app.logger.debug("Starting database initialization")
@@ -230,6 +230,18 @@ def close_connection(exception):
         except Exception as e:
             app.logger.error(f"Error closing database connection: {e}")
             # Even if close fails, remove the reference              
+
+def initialize_database():
+    try:
+        with app.app_context():
+            success = init_db()
+            if not success:
+                app.logger.error("Database initialization failed during startup")
+                sys.exit(1)  # Exit if database init fails
+            app.logger.info("Database initialized successfully during startup")
+    except Exception as e:
+        app.logger.error(f"Critical error during database initialization: {str(e)}")
+        sys.exit(1)
 
 # Call this function when the app starts
 with app.app_context():
