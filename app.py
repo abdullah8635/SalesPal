@@ -125,15 +125,17 @@ def return_db(conn):
 def init_db():
     db = None
     try:
+        app.logger.debug("Starting database initialization")
         db = get_db()
         if db is None:
             app.logger.error("Could not establish database connection")
             return
             
         with db.cursor() as cursor:
+            app.logger.debug("Setting search path")
             cursor.execute('SET search_path TO public')
-
-            # Create users table first
+            
+            app.logger.debug("Creating users table")
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS users (
                     id SERIAL PRIMARY KEY,
@@ -147,8 +149,8 @@ def init_db():
                     rejected INTEGER DEFAULT 0
                 );
             ''')
-
-            # Create parsed_receipts table
+            
+            app.logger.debug("Creating parsed_receipts table")
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS parsed_receipts (
                     id SERIAL PRIMARY KEY,
@@ -169,32 +171,33 @@ def init_db():
                     FOREIGN KEY(user_id) REFERENCES users(id)
                 );
             ''')
-
-            # Check if admin user exists
+            
+            app.logger.debug("Checking for admin user")
             cursor.execute("SELECT * FROM users WHERE username = 'admin'")
             admin_exists = cursor.fetchone()
             
-            # Create default admin if it doesn't exist
             if not admin_exists:
+                app.logger.debug("Creating admin user")
                 admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
                 cursor.execute('''
                     INSERT INTO users (name, email, phone, username, password, approved, is_admin)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)
                 ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
-
-            # Commit all changes
+            
             db.commit()
             app.logger.info("Database tables and admin user created successfully")
-
+            
     except Exception as e:
         app.logger.error(f"Detailed error in init_db: {type(e).__name__}")
-        app.logger.error(f"Error message: {e}")
+        app.logger.error(f"Error message: {str(e)}")
+        app.logger.error(f"Error traceback: {traceback.format_exc()}")
         if db:
             db.rollback()
-        raise  # Re-raise to see full traceback
+        raise
     finally:
         if db:
-            db.close()
+            app.logger.debug("Closing database connection")
+            return_db(db)  # Use return_db instead of close()
             
 @app.teardown_appcontext
 def close_connection(exception):
