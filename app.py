@@ -253,7 +253,32 @@ def close_connection(exception):
         except Exception as e:
             app.logger.error(f"Error closing database connection: {e}")
             # Even if close fails, remove the reference              
+CONNECTION_POOL = None
 
+def init_db_pool(app):
+    global CONNECTION_POOL
+    try:
+        CONNECTION_POOL = SimpleConnectionPool(
+            minconn=1,   # Minimum number of connections
+            maxconn=20,  # Maximum number of connections
+            host=app.config['DB_HOST'],
+            database=app.config['DB_NAME'],
+            user=app.config['DB_USER'],
+            password=app.config['DB_PASSWORD']
+        )
+        app.logger.info("Database connection pool initialized successfully")
+    except Exception as e:
+        app.logger.error(f"Error initializing database connection pool: {e}")
+        raise
+      
+def release_db(conn):
+    global CONNECTION_POOL
+    try:
+        if CONNECTION_POOL and conn:
+            CONNECTION_POOL.putconn(conn)
+    except Exception as e:
+        logging.error(f"Error releasing database connection: {e}")
+      
 def initialize_database():
     try:
         with app.app_context():
