@@ -831,14 +831,6 @@ def employee_list():
         if 'db' in locals():
             db.close()
 
-@app.route('/admin/commission')
-@login_required
-def view_commission():
-    if 'admin' not in session:
-        return redirect(url_for('login'))
-    
-    return "<h1>Commission Information Page</h1><p>This page will show commissions of all employees.</p>"
-
 @app.route('/admin/assign_username/<int:user_id>', methods=['POST'])
 @login_required
 def assign_username(user_id):
@@ -1494,90 +1486,102 @@ def receipt_details(rq_invoice):
 @app.route('/commission')
 @login_required
 def commission():
-    if 'logged_in' not in session:
-        return redirect(url_for('login'))
-
-    db = get_db()
-    cursor = db.cursor()
+    conn = None
+    try:
+        conn = get_db()
+        if conn is None:
+            flash('Database connection error', 'error')
+            return render_template('error.html'), 500
+        
+        with conn.cursor() as cursor:
+            # Check if user is admin
+            cursor.execute("SELECT is_admin FROM users WHERE id = %s", (current_user.id,))
+            user = cursor.fetchone()
+            is_admin = user and user[0] == 1
+            
+            if is_admin:
+                # Query for all non-admin users
+                cursor.execute('''
+                    SELECT 
+                        users.username, 
+                        users.name,
+                        SUM(COALESCE(parsed_receipts.activations_count, 0)) as total_activations,
+                        SUM(COALESCE(parsed_receipts.upgrades_count, 0)) as total_upgrades,
+                        SUM(COALESCE(parsed_receipts.activations_count, 0) + COALESCE(parsed_receipts.upgrades_count, 0)) as total_devices,
+                        COALESCE(SUM(parsed_receipts.total_price), 0) as total_accessories,
+                        CASE 
+                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1750 THEN 4
+                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1000 THEN 3
+                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 750 THEN 2
+                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 500 THEN 1
+                            ELSE 1
+                        END as current_tier
+                    FROM 
+                        users
+                    LEFT JOIN 
+                        parsed_receipts ON users.id = parsed_receipts.user_id
+                    WHERE
+                        users.is_admin = 0
+                    GROUP BY 
+                        users.username, users.name
+                ''')
+                commission_data = cursor.fetchall()
+                
+                return render_template('commission.html', 
+                                     commission_data=commission_data, 
+                                     is_admin=True,
+                                     current_user=current_user.name)
+            else:
+                # Query for current user
+                cursor.execute('''
+                    SELECT 
+                        users.username, 
+                        users.name,
+                        SUM(COALESCE(parsed_receipts.activations_count, 0)) as total_activations,
+                        SUM(COALESCE(parsed_receipts.upgrades_count, 0)) as total_upgrades,
+                        SUM(COALESCE(parsed_receipts.activations_count, 0) + COALESCE(parsed_receipts.upgrades_count, 0)) as total_devices,
+                        COALESCE(SUM(parsed_receipts.total_price), 0) as total_accessories,
+                        CASE 
+                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1750 THEN 4
+                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1000 THEN 3
+                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 750 THEN 2
+                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 500 THEN 1
+                            ELSE 1
+                        END as current_tier
+                    FROM 
+                        users
+                    LEFT JOIN 
+                        parsed_receipts ON users.id = parsed_receipts.user_id
+                    WHERE 
+                        users.id = %s
+                    GROUP BY 
+                        users.username, users.name
+                ''', (current_user.id,))
+                commission_data = cursor.fetchall()
+                
+                # Calculate accessories total and progress
+                accessories_total = commission_data[0][5] if commission_data else 0
+                progress = min((float(accessories_total) / 1750 * 100), 100)
+                
+                # Get tier from the query result
+                current_tier = commission_data[0][6] if commission_data else 1
+                
+                return render_template('commission.html', 
+                                     commission_data=commission_data, 
+                                     is_admin=False,
+                                     accessories_total=accessories_total,
+                                     current_tier=current_tier,
+                                     progress=progress,
+                                     current_user=current_user.name)
     
-    # Check if user is admin
-    cursor.execute("SELECT is_admin FROM users WHERE id = %s", (current_user.id,))
-    user = cursor.fetchone()
-    is_admin = user and user[0] == 1
-    current_user = user[0] if user else 'User'
-
-    if is_admin:
-        cursor.execute('''
-            SELECT 
-                users.username, 
-                users.name,
-                SUM(COALESCE(parsed_receipts.activations_count, 0)) as total_activations,
-                SUM(COALESCE(parsed_receipts.upgrades_count, 0)) as total_upgrades,
-                SUM(COALESCE(parsed_receipts.activations_count, 0) + COALESCE(parsed_receipts.upgrades_count, 0)) as total_devices,
-                COALESCE(SUM(parsed_receipts.total_price), 0) as total_accessories,
-                CASE 
-                    WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1750 THEN 4
-                    WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1000 THEN 3
-                    WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 750 THEN 2
-                    WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 500 THEN 1
-                    ELSE 1
-                END as current_tier
-            FROM 
-                users
-            LEFT JOIN 
-                parsed_receipts ON users.id = parsed_receipts.user_id
-            WHERE
-                users.is_admin = 0
-            GROUP BY 
-                users.username, users.name
-        ''')
-        commission_data = cursor.fetchall()
-        return render_template('commission.html', 
-                             commission_data=commission_data, 
-                             is_admin=is_admin,
-                             current_user=current_user)
-    else:
-        cursor.execute('''
-            SELECT 
-                users.username, 
-                users.name,
-                SUM(COALESCE(parsed_receipts.activations_count, 0)) as total_activations,
-                SUM(COALESCE(parsed_receipts.upgrades_count, 0)) as total_upgrades,
-                SUM(COALESCE(parsed_receipts.activations_count, 0) + COALESCE(parsed_receipts.upgrades_count, 0)) as total_devices,
-                COALESCE(SUM(parsed_receipts.total_price), 0) as total_accessories,
-                CASE 
-                    WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1750 THEN 4
-                    WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1000 THEN 3
-                    WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 750 THEN 2
-                    WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 500 THEN 1
-                    ELSE 1
-                END as current_tier
-            FROM 
-                users
-            LEFT JOIN 
-                parsed_receipts ON users.id = parsed_receipts.user_id
-            WHERE 
-                users.id = %s
-            GROUP BY 
-                users.username, users.name
-        ''', (current_user.id,))
-
-        commission_data = cursor.fetchall()
-        
-        # Calculate accessories total and progress
-        accessories_total = commission_data[0][5] if commission_data else 0
-        progress = min((float(accessories_total) / 1750 * 100), 100)
-        
-        # Get tier from the query result
-        current_tier = commission_data[0][6] if commission_data else 1
-
-        return render_template('commission.html', 
-                             commission_data=commission_data, 
-                             is_admin=is_admin,
-                             accessories_total=accessories_total,
-                             current_tier=current_tier,
-                             progress=progress,
-                             current_user=current_user)
+    except Exception as e:
+        app.logger.error(f"Error in commission route: {str(e)}")
+        flash('An error occurred while retrieving commission data', 'error')
+        return render_template('error.html'), 500
+    
+    finally:
+        if conn:
+            release_db(conn)
 
 if __name__ == '__main__':
     # Import sys if not already imported
