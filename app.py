@@ -542,45 +542,40 @@ def generate_random_password(length, include_special_chars=False):
 def login():
     
     if request.method == 'POST':
-    username = request.form.get('username', '')
-    password = request.form.get('password', '')
-
-    try:
-        db = get_db()
-        if db is None:
-            flash("Database connection error", "error")
-            return render_template('login.html')
-
-        with db.cursor() as cursor:
-            cursor.execute("""
-                SELECT id, name, email, phone, username, password, approved, is_admin 
-                FROM users 
-                WHERE username = %s
-            """, (username,))
-            user_data = cursor.fetchone()
-
-            if user_data:
-                print("User found in database.")
-                is_password_correct = bcrypt.check_password_hash(user_data[5], password)
-                print(f"Password verification for '{username}': {is_password_correct}")
-
-                if is_password_correct and user_data[6] == 1:  # Approved
-                    session.clear()
-                    session['logged_in'] = True
-                    session['username'] = username
-                    session['user_id'] = user_data[0]
-                    if user_data[7] == 1:
-                        return redirect(url_for('admin_home'))
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+        try:
+            db = get_db()
+            if db is None:
+                flash("Database connection error", "error")
+                return render_template('login.html')
+            with db.cursor() as cursor:
+                cursor.execute("""
+                    SELECT id, name, email, phone, username, password, approved, is_admin 
+                    FROM users 
+                    WHERE username = %s
+                """, (username,))
+                user_data = cursor.fetchone()
+                if user_data:
+                    print("User found in database.")
+                    is_password_correct = bcrypt.check_password_hash(user_data[5], password)
+                    print(f"Password verification for '{username}': {is_password_correct}")
+                    if is_password_correct and user_data[6] == 1:  # Approved
+                        session.clear()
+                        session['logged_in'] = True
+                        session['username'] = username
+                        session['user_id'] = user_data[0]
+                        if user_data[7] == 1:
+                            return redirect(url_for('admin_home'))
+                        else:
+                            return redirect(url_for('non_admin_dashboard'))
                     else:
-                        return redirect(url_for('non_admin_dashboard'))
+                        flash("Invalid username or password or account not approved", "error")
                 else:
-                    flash("Invalid username or password or account not approved", "error")
-            else:
-                flash("Invalid username or password", "error")
-
-    except Exception as e:
-        print("Unexpected login error:", str(e))
-        flash("An unexpected error occurred", "error")
+                    flash("Invalid username or password", "error")
+        except Exception as e:
+            print("Unexpected login error:", str(e))
+            flash("An unexpected error occurred", "error")
     
     return render_template('login.html')
 
