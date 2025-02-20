@@ -852,18 +852,43 @@ def reject_account(user_id):
 @app.route('/admin/delete/<int:user_id>', methods=['POST'])
 @login_required
 def delete_account(user_id):
-    if 'admin' not in session:
+    # Ensure only admins can delete accounts
+    if not current_user.is_admin:
+        flash('Access denied. Admin privileges required.', 'error')
         return redirect(url_for('login'))
-
-    db = get_db()
-    cursor = db.cursor()
     
-    # Delete the user by ID
-    cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
-    db.commit()
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        
+        # Check if the user to be deleted exists and is not an admin
+        cursor.execute("SELECT is_admin FROM users WHERE id = %s", (user_id,))
+        user = cursor.fetchone()
+        
+        if not user:
+            flash('User not found.', 'error')
+            return redirect(url_for('employee_list'))
+        
+        if user[0] == 1:  # Prevent deleting other admin accounts
+            flash('Cannot delete another admin account.', 'error')
+            return redirect(url_for('employee_list'))
+        
+        # Delete the user by ID
+        cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
+        db.commit()
+        
+        flash('User account deleted successfully.', 'success')
+        return redirect(url_for('employee_list'))
     
-    return redirect(url_for('employee_list'))
-
+    except Exception as e:
+        app.logger.error(f"Error deleting user account: {str(e)}")
+        flash('An error occurred while deleting the account.', 'error')
+        return redirect(url_for('employee_list'))
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'db' in locals():
+            db.close()
 @app.route('/logout')
 def logout():
     session.pop('logged_in', None)
