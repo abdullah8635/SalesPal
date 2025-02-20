@@ -412,6 +412,7 @@ def update_receipt_details(rq_invoice):
         return jsonify({'error': str(e)}), 500
     
 @app.route('/api/update_device_info/<int:receipt_id>', methods=['POST'])
+@login_required
 def update_device_info(receipt_id):
     try:
         data = request.json
@@ -437,6 +438,7 @@ def update_device_info(receipt_id):
         return jsonify({'status': 'error', 'message': str(e)}), 500
     
 @app.route('/non_admin_dashboard')
+@login_required
 def non_admin_dashboard():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
@@ -473,6 +475,7 @@ def non_admin_dashboard():
     return redirect(url_for('admin_home'))
 
 @app.route('/delete_receipt/<int:receipt_id>', methods=['POST'])
+@login_required
 def delete_receipt(receipt_id):
     if 'logged_in' not in session:
         return redirect(url_for('login'))
@@ -507,6 +510,7 @@ def round_up(value, decimals=2):
 
 
 @app.route('/admin/pending_accounts')
+@login_required
 def pending_accounts():
     if 'admin' not in session:
         return redirect(url_for('login'))
@@ -792,6 +796,7 @@ def employee_list():
             db.close()
 
 @app.route('/admin/commission')
+@login_required
 def view_commission():
     if 'admin' not in session:
         return redirect(url_for('login'))
@@ -799,6 +804,7 @@ def view_commission():
     return "<h1>Commission Information Page</h1><p>This page will show commissions of all employees.</p>"
 
 @app.route('/admin/assign_username/<int:user_id>', methods=['POST'])
+@login_required
 def assign_username(user_id):
     if 'admin' not in session:
         return redirect(url_for('login'))
@@ -813,21 +819,8 @@ def assign_username(user_id):
 
     return redirect(url_for('employee_list'))
 
-@app.route('/admin/approve_user/<int:user_id>', methods=['POST'])
-def approve_user_account(user_id):
-    if 'admin' not in session:
-        return redirect(url_for('login'))
-
-    db = get_db()
-    cursor = db.cursor()
-    
-    # Set approved status to 1
-    cursor.execute("UPDATE users SET approved = 1 WHERE id = %s", (user_id,))
-    db.commit()
-    
-    return redirect(url_for('employee_list'))
-
 @app.route('/admin/approve/<int:user_id>', methods=['POST'])
+@login_required
 def approve_account(user_id):
     if 'admin' not in session:
         return redirect(url_for('login'))
@@ -842,6 +835,7 @@ def approve_account(user_id):
     return redirect(url_for('employee_list'))
 
 @app.route('/admin/reject/<int:user_id>', methods=['POST'])
+@login_required
 def reject_account(user_id):
     if 'admin' not in session:
         return redirect(url_for('login'))
@@ -856,6 +850,7 @@ def reject_account(user_id):
     return redirect(url_for('employee_list'))
 
 @app.route('/admin/delete/<int:user_id>', methods=['POST'])
+@login_required
 def delete_account(user_id):
     if 'admin' not in session:
         return redirect(url_for('login'))
@@ -996,6 +991,7 @@ def calculate_accessories(pdf_text: str) -> Tuple[float, List[float]]:
 
 # PDF upload page
 @app.route('/upload', methods=['GET', 'POST'])
+@login_required
 def upload_pdf():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
@@ -1009,7 +1005,7 @@ def upload_pdf():
                 return "Database connection error", 500
                 
             with db.cursor() as cursor:
-                cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
+                cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
                 user = cursor.fetchone()
                 current_user = user[0] if user else 'User'
                 
@@ -1157,6 +1153,7 @@ def upload_pdf():
         return jsonify({'error': 'An unexpected error occurred during upload'}), 500
     
 @app.route('/confirm', methods=['GET', 'POST'])
+@login_required
 def confirm_receipt():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
@@ -1179,7 +1176,7 @@ def confirm_receipt():
     # Get logged in user's name
     db = get_db()
     cursor = db.cursor()
-    cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
+    cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
     user = cursor.fetchone()
     logged_in_user = user[0] if user else None
     
@@ -1220,7 +1217,7 @@ def confirm_receipt():
             form_data['sales_person'], form_data['rq_invoice'], form_data['total_price'],
             form_data['accessories_prices'], form_data['upgrades_count'],
             form_data['activations_count'], form_data['ppp_present'],
-            form_data['activation_fee_sum'], session['user_id'], imei_iccid_json
+            form_data['activation_fee_sum'], current_user.id, imei_iccid_json
         ))
         
         db.commit()
@@ -1248,6 +1245,7 @@ def confirm_receipt():
                          **current_pdf)
 
 @app.route('/view_receipts')
+@login_required
 def view_receipts():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
@@ -1256,12 +1254,12 @@ def view_receipts():
     cursor = db.cursor()
 
     # Get the current user's name
-    cursor.execute("SELECT name FROM users WHERE id = %s", (session['user_id'],))
+    cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
     user_data = cursor.fetchone()
     current_user = user_data[0] if user_data else 'User'
 
     # Fetch user details to check if the logged-in user is an admin
-    cursor.execute("SELECT * FROM users WHERE id = %s", (session['user_id'],))
+    cursor.execute("SELECT * FROM users WHERE id = %s", (current_user.id,))
     user = cursor.fetchone()
     
     if user and user[7] == 1:  # Admin user
@@ -1279,12 +1277,13 @@ def view_receipts():
             FROM parsed_receipts r
             LEFT JOIN users u ON r.user_id = u.id
             WHERE r.user_id = %s
-        """, (session['user_id'],))
+        """, (current_user.id,))
     
     receipts = cursor.fetchall()
     return render_template('view_receipts.html', receipts=receipts, current_user=current_user)
 
 @app.route('/receipt_details/<string:rq_invoice>')
+@login_required
 def receipt_details(rq_invoice):
     if 'logged_in' not in session:
         return redirect(url_for('login'))
@@ -1293,7 +1292,7 @@ def receipt_details(rq_invoice):
     cursor = db.cursor()
 
     # Fetch user details to check if admin
-    cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (session['user_id'],))
+    cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (current_user.id,))
     user = cursor.fetchone()
     is_admin = user and user[2] == 1
     current_user = user[1] if user else 'User'
@@ -1340,7 +1339,7 @@ def receipt_details(rq_invoice):
             FROM parsed_receipts r
             LEFT JOIN users u ON r.user_id = u.id
             WHERE r.rq_invoice = %s AND r.user_id = %s
-        """, (rq_invoice, session['user_id']))
+        """, (rq_invoice, current_user.id))
 
     receipt = cursor.fetchone()
     if not receipt:
@@ -1356,6 +1355,7 @@ def receipt_details(rq_invoice):
     return render_template('receipt_details.html', receipt=receipt, imei_iccid_pairs=imei_iccid_pairs, current_user=current_user)
 
 @app.route('/commission')
+@login_required
 def commission():
     if 'logged_in' not in session:
         return redirect(url_for('login'))
@@ -1364,7 +1364,7 @@ def commission():
     cursor = db.cursor()
     
     # Check if user is admin
-    cursor.execute("SELECT is_admin FROM users WHERE id = %s", (session['user_id'],))
+    cursor.execute("SELECT is_admin FROM users WHERE id = %s", (current_user.id,))
     user = cursor.fetchone()
     is_admin = user and user[0] == 1
     current_user = user[0] if user else 'User'
@@ -1423,7 +1423,7 @@ def commission():
                 users.id = %s
             GROUP BY 
                 users.username, users.name
-        ''', (session['user_id'],))
+        ''', (current_user.id,))
 
         commission_data = cursor.fetchall()
         
