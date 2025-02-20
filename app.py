@@ -822,17 +822,44 @@ def assign_username(user_id):
 @app.route('/admin/approve/<int:user_id>', methods=['POST'])
 @login_required
 def approve_account(user_id):
-    if 'admin' not in session:
+    # Ensure only admins can approve accounts
+    if not current_user.is_admin:
+        flash('Access denied. Admin privileges required.', 'error')
         return redirect(url_for('login'))
-
-    db = get_db()
-    cursor = db.cursor()
-
-    # Update the user's approved status to 1
-    cursor.execute("UPDATE users SET approved = 1, rejected = 0 WHERE id = %s", (user_id,))
-    db.commit()
-
-    return redirect(url_for('employee_list'))
+    
+    try:
+        db = get_db()
+        cursor = db.cursor()
+        
+        # Check if the user exists
+        cursor.execute("SELECT approved, rejected FROM users WHERE id = %s", (user_id,))
+        user = cursor.fetchone()
+        
+        if not user:
+            flash('User not found.', 'error')
+            return redirect(url_for('employee_list'))
+        
+        # Check if user is already approved
+        if user[0] == 1:
+            flash('User account is already approved.', 'info')
+            return redirect(url_for('employee_list'))
+        
+        # Update the user's approved status to 1 and clear rejected flag
+        cursor.execute("UPDATE users SET approved = 1, rejected = 0 WHERE id = %s", (user_id,))
+        db.commit()
+        
+        flash('User account approved successfully.', 'success')
+        return redirect(url_for('employee_list'))
+    
+    except Exception as e:
+        app.logger.error(f"Error approving user account: {str(e)}")
+        flash('An error occurred while approving the account.', 'error')
+        return redirect(url_for('employee_list'))
+    finally:
+        if 'cursor' in locals():
+            cursor.close()
+        if 'db' in locals():
+            db.close()
 
 @app.route('/admin/reject/<int:user_id>', methods=['POST'])
 @login_required
