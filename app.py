@@ -54,7 +54,7 @@ app.config.update(
 
 db_pool = SimpleConnectionPool(
     minconn=1,
-    maxconn=10,
+    maxconn=10000,
     host=app.config['DB_HOST'],
     database=app.config['DB_NAME'],
     user=app.config['DB_USER'],
@@ -136,7 +136,12 @@ class User(UserMixin):
 
     def get_id(self):
         return self.id
-      
+def release_db(conn):
+    if conn:
+        try:
+            CONNECTION_POOL.putconn(conn)
+        except Exception as e:
+            app.logger.error(f"Error releasing database connection: {e}")     
 def get_db():
     try:
         # Log connection attempt
@@ -285,9 +290,14 @@ app.logger.addHandler(handler)
 
 @login_manager.user_loader
 def load_user(user_id):
+    conn = None
     try:
-        db = get_db()
-        with db.cursor() as cursor:
+        conn = get_db()
+        if conn is None:
+            logging.error("Could not establish database connection for user loading")
+            return None
+        
+        with conn.cursor() as cursor:
             cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (user_id,))
             user_data = cursor.fetchone()
             if user_data:
@@ -299,8 +309,10 @@ def load_user(user_id):
         return None
     except Exception as e:
         logging.error(f"Error loading user: {e}")
-        return None  # Return None on error for login_manager
-
+        return None
+    finally:
+        if conn:
+            release_db(conn)
 # Redis connection check (separate from user loader)
 try:
     limiter.storage.storage.ping()
@@ -735,16 +747,18 @@ def home():
 def admin_home():
     # Check if the current user is an admin
     if not current_user.is_admin:
-        flash('Access denied. Admin privileges required.')
+        flash('Access denied. Admin privileges required.', 'error')
         return redirect(url_for('login'))
         
+    conn = None
     try:
-        db = get_db()
-        if db is None:
+        conn = get_db()
+        if conn is None:
             app.logger.error("Could not establish database connection")
-            return "Database connection error", 500
+            flash("Database connection error", "error")
+            return render_template('error.html'), 500
             
-        with db.cursor() as cursor:
+        with conn.cursor() as cursor:
             # Use current_user.id from Flask-Login
             cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
             user = cursor.fetchone()
@@ -754,10 +768,12 @@ def admin_home():
         
     except Exception as e:
         app.logger.error(f"Error in admin home: {str(e)}")
-        return "Error loading admin home", 500
+        flash("An error occurred while loading admin home", "error")
+        return render_template('error.html'), 500
+    
     finally:
-        if 'db' in locals():
-            db.close()
+        if conn:
+            release_db(conn)  # Use connection pool release method
 
 # Admin page to list employees and approve/reject accounts
 @app.route('/admin/employees')
