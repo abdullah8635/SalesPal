@@ -20,6 +20,7 @@ import io
 from werkzeug.utils import secure_filename
 import psycopg2
 from psycopg2 import errors
+from contextlib import contextmanager
 from psycopg2.extras import DictCursor
 from psycopg2.pool import SimpleConnectionPool
 from functools import wraps
@@ -56,7 +57,11 @@ db_pool = SimpleConnectionPool(
     host=app.config['DB_HOST'],
     database=app.config['DB_NAME'],
     user=app.config['DB_USER'],
-    password=app.config['DB_PASSWORD']
+    password=app.config['DB_PASSWORD'],
+    keepalives=1,
+    keepalives_idle=30,
+    keepalives_interval=10,
+    keepalives_count=5
 )
 
 bcrypt = Bcrypt(app)
@@ -66,6 +71,16 @@ limiter = Limiter(
     storage_uri="redis://localhost:6379",
     default_limits=["200 per day", "1000 per hour"]
 )
+
+@contextmanager
+def get_db_connection():
+    conn = None
+    try:
+        conn = get_db()
+        yield conn
+    finally:
+        if conn:
+            return_db(conn)
 
 @app.errorhandler(500)
 def handle_500(e):
@@ -111,7 +126,13 @@ def get_db():
         
         return connection
     except Exception as e:
-        app.logger.error(f"Failed to get database connection: {e}")
+        app.logger.error(f"Failed to get database connection: {str(e)}")
+        # If we got a connection but the test failed, return it to the pool
+        if 'connection' in locals():
+            try:
+                db_pool.putconn(connection)
+            except Exception as put_err:
+                app.logger.error(f"Failed to return failed connection to pool: {str(put_err)}")
         return None
 
 def return_db(conn):
@@ -120,85 +141,85 @@ def return_db(conn):
             db_pool.putconn(conn)
             app.logger.debug("Connection returned to pool successfully")
         except Exception as e:
-            app.logger.error(f"Error returning connection to pool: {e}")
+            app.logger.error(f"Error returning connection to pool: {str(e)}")
         
 def init_db():
-    db = None
     try:
         app.logger.debug("Starting database initialization")
-        db = get_db()
-        if db is None:
-            app.logger.error("Could not establish database connection")
-            return
+        with get_db_connection() as conn:  # Use the context manager
+            if conn is None:
+                app.logger.error("Could not establish database connection")
+                return False
             
-        with db.cursor() as cursor:
-            app.logger.debug("Setting search path")
-            cursor.execute('SET search_path TO public')
-            
-            app.logger.debug("Creating users table")
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS users (
-                    id SERIAL PRIMARY KEY,
-                    name VARCHAR(255) UNIQUE NOT NULL,
-                    email VARCHAR(255) UNIQUE NOT NULL,
-                    phone VARCHAR(20) UNIQUE NOT NULL,
-                    username VARCHAR(50) UNIQUE,
-                    password TEXT,
-                    approved INTEGER DEFAULT 0,
-                    is_admin INTEGER DEFAULT 0,
-                    rejected INTEGER DEFAULT 0
-                );
-            ''')
-            
-            app.logger.debug("Creating parsed_receipts table")
-            cursor.execute('''
-                CREATE TABLE IF NOT EXISTS parsed_receipts (
-                    id SERIAL PRIMARY KEY,
-                    company_name TEXT,
-                    customer TEXT,
-                    order_date TEXT,
-                    sales_person TEXT,
-                    rq_invoice TEXT,
-                    total_price REAL,
-                    accessory_prices TEXT,
-                    upgrades_count INTEGER,
-                    activations_count INTEGER,
-                    ppp_present BOOLEAN,
-                    activation_fee_sum REAL,
-                    user_id INTEGER,
-                    date_submitted TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    imei_iccid_pairs TEXT,
-                    FOREIGN KEY(user_id) REFERENCES users(id)
-                );
-            ''')
-            
-            app.logger.debug("Checking for admin user")
-            cursor.execute("SELECT * FROM users WHERE username = 'admin'")
-            admin_exists = cursor.fetchone()
-            
-            if not admin_exists:
-                app.logger.debug("Creating admin user")
-                admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
+            # This should be inside the first with block
+            with conn.cursor() as cursor:
+                app.logger.debug("Setting search path")
+                cursor.execute('SET search_path TO public')
+                
+                app.logger.debug("Creating users table")
                 cursor.execute('''
-                    INSERT INTO users (name, email, phone, username, password, approved, is_admin)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)
-                ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
-            
-            db.commit()
-            app.logger.info("Database tables and admin user created successfully")
-            
+                    CREATE TABLE IF NOT EXISTS users (
+                        id SERIAL PRIMARY KEY,
+                        name VARCHAR(255) UNIQUE NOT NULL,
+                        email VARCHAR(255) UNIQUE NOT NULL,
+                        phone VARCHAR(20) UNIQUE NOT NULL,
+                        username VARCHAR(50) UNIQUE,
+                        password TEXT,
+                        approved INTEGER DEFAULT 0,
+                        is_admin INTEGER DEFAULT 0,
+                        rejected INTEGER DEFAULT 0
+                    );
+                ''')
+                
+                app.logger.debug("Creating parsed_receipts table")
+                cursor.execute('''
+                    CREATE TABLE IF NOT EXISTS parsed_receipts (
+                        id SERIAL PRIMARY KEY,
+                        company_name TEXT,
+                        customer TEXT,
+                        order_date TEXT,
+                        sales_person TEXT,
+                        rq_invoice TEXT,
+                        total_price REAL,
+                        accessory_prices TEXT,
+                        upgrades_count INTEGER,
+                        activations_count INTEGER,
+                        ppp_present BOOLEAN,
+                        activation_fee_sum REAL,
+                        user_id INTEGER,
+                        date_submitted TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                        imei_iccid_pairs TEXT,
+                        FOREIGN KEY(user_id) REFERENCES users(id)
+                    );
+                ''')
+                
+                app.logger.debug("Checking for admin user")
+                cursor.execute("SELECT * FROM users WHERE username = 'admin'")
+                admin_exists = cursor.fetchone()
+                
+                if not admin_exists:
+                    app.logger.debug("Creating admin user")
+                    admin_password = bcrypt.generate_password_hash('admin123').decode('utf-8')
+                    cursor.execute('''
+                        INSERT INTO users (name, email, phone, username, password, approved, is_admin)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    ''', ('Admin User', 'admin@example.com', '1234567890', 'admin', admin_password, 1, 1))
+                
+                conn.commit()
+                app.logger.info("Database tables and admin user created successfully")
+                return True
+                
     except Exception as e:
-        app.logger.error(f"Detailed error in init_db: {type(e).__name__}")
-        app.logger.error(f"Error message: {str(e)}")
-        app.logger.error(f"Error traceback: {traceback.format_exc()}")
-        if db:
-            db.rollback()
-        raise
-    finally:
-        if db:
-            app.logger.debug("Closing database connection")
-            return_db(db)  # Use return_db instead of close()
-            
+        app.logger.error(f"Database initialization error: {type(e).__name__}")
+        app.logger.error(f"Error details: {str(e)}")
+        if 'conn' in locals():  # Only try to rollback if we have a connection
+            try:
+                conn.rollback()
+                app.logger.debug("Transaction rolled back successfully")
+            except Exception as rollback_error:
+                app.logger.error(f"Rollback failed: {str(rollback_error)}")
+        return False
+      
 @app.teardown_appcontext
 def close_connection(exception):
     db = g.pop('db', None)
@@ -229,33 +250,34 @@ app.logger.addHandler(handler)
 
 @login_manager.user_loader
 def load_user(user_id):
-    db = get_db()
-    cursor = db.cursor()
-    cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (user_id,))
-    user = cursor.fetchone()
-    if user:
-        return User(
-            id=user[0],
-            name=user[1],
-            is_admin=user[2]
-        )
-    return None
-
-    # Log additional context
-    app.logger.error(f"Exception Type: {type(e).__name__}")
-    app.logger.error(f"Exception Details: {str(e)}")
-    
-    # Optional: Log request details
     try:
-        app.logger.error(f"Request Method: {request.method}")
-        app.logger.error(f"Request URL: {request.url}")
-        app.logger.error(f"Request Headers: {request.headers}")
-    except:
-        pass
-    
-    return "Internal server error", 500
+        with get_db_connection() as db:  # Use context manager for connection
+            with db.cursor() as cursor:  # Use context manager for cursor
+                cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (user_id,))
+                user = cursor.fetchone()
+                if user:
+                    return User(
+                        id=user[0],
+                        name=user[1],
+                        is_admin=user[2]
+                    )
+                return None
+    except Exception as e:
+        # Log the error
+        app.logger.error(f"Exception in load_user: {type(e).__name__}")
+        app.logger.error(f"Exception Details: {str(e)}")
+        
+        # Log request details if available
+        try:
+            app.logger.error(f"Request Method: {request.method}")
+            app.logger.error(f"Request URL: {request.url}")
+            app.logger.error(f"Request Headers: {request.headers}")
+        except:
+            pass
+        
+        return None  # Return None on error for login_manager
 
-
+# Redis connection check (separate from user loader)
 try:
     limiter.storage.storage.ping()
     app.logger.info("Successfully connected to Redis")
@@ -1340,7 +1362,19 @@ def commission():
                              current_user=current_user)
 
 if __name__ == '__main__':
-    with app.app_context():
-        init_db()  # Initialize the database tables
+    # Import sys if not already imported
+    import sys
+    
+    # Initialize database first
+    initialize_database()
+    
+    # Get port from environment or use default
     port = int(os.environ.get('PORT', 5000))
-    app.run(host='0.0.0.0', port=port,debug=True)
+    
+    # Run app with debug mode off in production
+    debug_mode = os.environ.get('FLASK_ENV') == 'development'
+    app.run(
+        host='0.0.0.0', 
+        port=port,
+        debug=debug_mode  # Only enable debug in development
+    )
