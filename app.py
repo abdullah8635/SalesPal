@@ -842,19 +842,45 @@ def view_commission():
 @app.route('/admin/assign_username/<int:user_id>', methods=['POST'])
 @login_required
 def assign_username(user_id):
-    if 'admin' not in session:
+    # Check if the current user is an admin
+    if not current_user.is_admin:
+        flash('Access denied. Admin privileges required.', 'error')
         return redirect(url_for('login'))
-
+    
     username = request.form['username']
-
-    db = get_db()
-    cursor = db.cursor()
-
-    cursor.execute("UPDATE users SET username = %s WHERE id = %s", (username, user_id))
-    db.commit()
-
-    return redirect(url_for('employee_list'))
-
+    conn = None
+    
+    try:
+        conn = get_db()
+        if conn is None:
+            flash('Database connection error', 'error')
+            return redirect(url_for('employee_list'))
+        
+        with conn.cursor() as cursor:
+            # Check if username already exists
+            cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+            existing_user = cursor.fetchone()
+            
+            if existing_user:
+                flash('Username already exists. Please choose another.', 'error')
+                return redirect(url_for('employee_list'))
+            
+            # Update username
+            cursor.execute("UPDATE users SET username = %s WHERE id = %s", (username, user_id))
+            conn.commit()
+            
+            flash('Username assigned successfully.', 'success')
+            return redirect(url_for('employee_list'))
+    
+    except Exception as e:
+        app.logger.error(f"Error assigning username: {str(e)}")
+        flash('An error occurred while assigning username.', 'error')
+        return redirect(url_for('employee_list'))
+    
+    finally:
+        if conn:
+            release_db(conn)
+          
 @app.route('/admin/approve/<int:user_id>', methods=['POST'])
 @login_required
 def approve_account(user_id):
@@ -900,17 +926,40 @@ def approve_account(user_id):
 @app.route('/admin/reject/<int:user_id>', methods=['POST'])
 @login_required
 def reject_account(user_id):
-    if 'admin' not in session:
+    # Check if the current user is an admin
+    if not current_user.is_admin:
+        flash('Access denied. Admin privileges required.', 'error')
         return redirect(url_for('login'))
-
-    db = get_db()
-    cursor = db.cursor()
-
-    # Set the rejected flag to 1
-    cursor.execute("UPDATE users SET rejected = 1, approved = 0 WHERE id = %s", (user_id,))
-    db.commit()
-
-    return redirect(url_for('employee_list'))
+    
+    conn = None
+    try:
+        conn = get_db()
+        if conn is None:
+            flash('Database connection error', 'error')
+            return redirect(url_for('employee_list'))
+        
+        with conn.cursor() as cursor:
+            # Check if user exists
+            cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+            if not cursor.fetchone():
+                flash('User not found.', 'error')
+                return redirect(url_for('employee_list'))
+            
+            # Set the rejected flag to 1 and approved flag to 0
+            cursor.execute("UPDATE users SET rejected = 1, approved = 0 WHERE id = %s", (user_id,))
+            conn.commit()
+            
+            flash('User account rejected successfully.', 'success')
+            return redirect(url_for('employee_list'))
+    
+    except Exception as e:
+        app.logger.error(f"Error rejecting user account: {str(e)}")
+        flash('An error occurred while rejecting the account.', 'error')
+        return redirect(url_for('employee_list'))
+    
+    finally:
+        if conn:
+            release_db(conn)
 
 @app.route('/admin/delete/<int:user_id>', methods=['POST'])
 @login_required
