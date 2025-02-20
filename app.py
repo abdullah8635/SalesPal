@@ -1,4 +1,4 @@
-from flask import Flask, request, session, flash, redirect, url_for, render_template, g, json, jsonify
+from flask import Flask, request, abort, session, flash, redirect, url_for, render_template, g, json, jsonify
 import re
 import traceback
 import sys
@@ -18,6 +18,7 @@ import mysql.connector
 from flask_mysqldb import MySQL
 import io
 from werkzeug.utils import secure_filename
+from werkzeug.exceptions import NotFound
 import psycopg2
 from psycopg2 import errors
 from contextlib import contextmanager
@@ -81,7 +82,29 @@ def get_db_connection():
     finally:
         if conn:
             return_db(conn)
+@app.errorhandler(404)
+def handle_404(e):
+    # Log the suspicious request
+    app.logger.warning(f"Suspicious 404 request: {request.url}")
+    
+    # Optional: Implement more sophisticated blocking
+    # For example, block IPs with too many 404 requests
+    return "Not Found", 404
 
+@app.before_request
+def block_suspicious_paths():
+    suspicious_paths = [
+        '/wp-includes',
+        '/xmlrpc.php',
+        '/wp-login.php',
+        '/feed/'
+    ]
+    
+    for path in suspicious_paths:
+        if path in request.path:
+            app.logger.warning(f"Blocked suspicious path: {request.path}")
+            abort(404)
+          
 @app.errorhandler(500)
 def handle_500(e):
     # Log the full traceback
