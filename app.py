@@ -578,7 +578,7 @@ def login():
             flash("An unexpected error occurred", "error")
     
     return render_template('login.html')
-
+  
 def reset_user_password(username, new_password):
     db = get_db()
     try:
