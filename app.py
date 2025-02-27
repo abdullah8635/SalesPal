@@ -1375,40 +1375,49 @@ def confirm_receipt():
 @app.route('/view_receipts')
 @login_required
 def view_receipts():
-    if 'logged_in' not in session:
+    try:
+        db = get_db()
+        if db is None:
+            flash("Database connection error", "error")
+            return redirect(url_for('login'))
+
+        with db.cursor() as cursor:
+            # Fetch user details in a single query
+            cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (current_user.id,))
+            user = cursor.fetchone()
+            
+            if not user:
+                flash("User not found", "error")
+                return redirect(url_for('login'))
+
+            user_id, current_user_name, is_admin = user
+            app.logger.info(f"User: {current_user_name}, Admin: {is_admin}")
+
+            # Fetch receipts based on user role
+            if is_admin:
+                cursor.execute("""
+                    SELECT r.*, u.name AS uploader_name
+                    FROM parsed_receipts r
+                    LEFT JOIN users u ON r.user_id = u.id
+                    ORDER BY r.date_submitted DESC
+                """)
+            else:
+                cursor.execute("""
+                    SELECT r.*, u.name AS uploader_name
+                    FROM parsed_receipts r
+                    LEFT JOIN users u ON r.user_id = u.id
+                    WHERE r.user_id = %s
+                """, (user_id,))
+            
+            receipts = cursor.fetchall()
+
+        return render_template('view_receipts.html', receipts=receipts, current_user=current_user_name)
+
+    except Exception as e:
+        app.logger.error(f"Error in view_receipts: {str(e)}")
+        flash("An unexpected error occurred", "error")
         return redirect(url_for('login'))
-    
-    db = get_db()
-    cursor = db.cursor()
 
-    # Get the current user's name
-    cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
-    user_data = cursor.fetchone()
-    current_user = user_data[0] if user_data else 'User'
-
-    # Fetch user details to check if the logged-in user is an admin
-    cursor.execute("SELECT * FROM users WHERE id = %s", (current_user.id,))
-    user = cursor.fetchone()
-    
-    if user and user[7] == 1:  # Admin user
-        cursor.execute("""
-            SELECT 
-             r.*, u.name as uploader_name
-            FROM parsed_receipts r
-            LEFT JOIN users u ON r.user_id = u.id
-            ORDER BY r.date_submitted DESC
-        """)
-    else:
-        cursor.execute("""
-            SELECT 
-             r.*, u.name as uploader_name
-            FROM parsed_receipts r
-            LEFT JOIN users u ON r.user_id = u.id
-            WHERE r.user_id = %s
-        """, (current_user.id,))
-    
-    receipts = cursor.fetchall()
-    return render_template('view_receipts.html', receipts=receipts, current_user=current_user)
 
 @app.route('/receipt_details/<string:rq_invoice>')
 @login_required
