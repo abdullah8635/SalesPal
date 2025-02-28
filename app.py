@@ -1195,7 +1195,7 @@ def upload_pdf():
                         uploaded_files.append(filename)
                         app.logger.info(f"Successfully processed {filename}")
 
-                    except PyPDF2.PdfReadError as e:
+                    except PyPDF2.errors.PdfReadError as e:
                         raise ValueError(f"Invalid PDF format: {str(e)}")
 
                 except Exception as e:
