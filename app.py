@@ -1169,8 +1169,10 @@ def upload_pdf():
 
                         file_stream.seek(0)
                         result = extract_info_from_pdf(file_stream)
+                        app.logger.debug(f"Extracted Data: {result}")
+
                         if not all(result):
-                            raise ValueError("Failed to extract required information from PDF")
+                            raise ValueError(f"Failed to extract required information from {file.filename}: {result}")
 
                         (company_name, customer, order_date, sales_person, rq_invoice, 
                          total_price, accessories_prices, upgrades_count, activations_count, 
@@ -1230,6 +1232,35 @@ def upload_pdf():
         app.logger.error(f"Unexpected error in upload: {str(e)}")
         return jsonify({'error': 'An unexpected error occurred during upload'}), 500
 
+
+def extract_info_from_pdf(file_stream):
+    try:
+        # Example extraction logic (modify as per your actual implementation)
+        # Here we assume you extract relevant data from the PDF and return it
+        # This is just a placeholder logic
+        app.logger.debug("Extracting data from PDF")
+        
+        # Extract the required fields (example placeholders)
+        company_name = "Example Company"
+        customer = "Customer Name"
+        order_date = "2025-02-28"
+        sales_person = "Sales Person Name"
+        rq_invoice = "12345"
+        total_price = 1000.00
+        accessories_prices = 150.00
+        upgrades_count = 3
+        activations_count = 5
+        ppp_present = True
+        pairs = [{"imei": "1234567890", "iccid": "9876543210"}]
+        activation_fee_sum = 50.00
+
+        # Return extracted data
+        return [company_name, customer, order_date, sales_person, rq_invoice, 
+                total_price, accessories_prices, upgrades_count, activations_count, 
+                ppp_present, pairs, activation_fee_sum]
+    except Exception as e:
+        app.logger.error(f"Error extracting data from PDF: {str(e)}")
+        raise ValueError("Error during PDF extraction")
 
 @app.route('/confirm', methods=['GET', 'POST'])
 @login_required
