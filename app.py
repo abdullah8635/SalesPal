@@ -9,6 +9,7 @@ from limits.storage import RedisStorage
 from datetime import timedelta, datetime
 from typing import List, Dict, Tuple, Optional
 import PyPDF2
+from PyPDF2.errors import PdfReadError
 import math
 import string
 import random
@@ -1131,7 +1132,7 @@ def upload_pdf():
             with db.cursor() as cursor:
                 cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
                 user = cursor.fetchone()
-                current_user_name = user[0] if user else 'User'
+                current_user_name = user[0] if user else 'User'  # Avoid conflicting variable names
 
             return render_template('upload.html', current_user=current_user_name)
 
@@ -1147,7 +1148,7 @@ def upload_pdf():
         app.logger.info(f"Processing {len(files)} files")
 
         for file in files:
-            if file and file.filename and allowed_file(file.filename):
+            if file and file.filename and allowed_file(file.filename):  # Ensure allowed_file() is defined
                 try:
                     filename = secure_filename(file.filename)
                     file_content = file.read()
@@ -1195,8 +1196,8 @@ def upload_pdf():
                         uploaded_files.append(filename)
                         app.logger.info(f"Successfully processed {filename}")
 
-                    except PyPDF2.errors.PdfReadError as e:
-                        raise ValueError(f"Invalid PDF format: {str(e)}")
+                    except PdfReadError as e:
+                        raise ValueError(f"Invalid PDF format: {str(e)}")  # Use imported PdfReadError
 
                 except Exception as e:
                     app.logger.error(f"Error processing {file.filename}: {str(e)}")
