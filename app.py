@@ -1265,107 +1265,108 @@ def extract_info_from_pdf(file_stream):
 @app.route('/confirm', methods=['GET', 'POST'])
 @login_required
 def confirm_receipt():
-    if 'logged_in' not in session:
-        return redirect(url_for('login'))
-    
-    if 'parsed_data_list' not in session:
-        return redirect(url_for('upload_pdf'))
-    
-    parsed_data_list = session.get('parsed_data_list', [])
-    current_index = session.get('current_pdf_index', 0)
-    
-    if current_index >= len(parsed_data_list):
-        # All PDFs have been processed
-        session.pop('parsed_data_list', None)
-        session.pop('current_pdf_index', None)
-        return redirect(url_for('view_receipts'))
-    
-    # Get current PDF data
-    current_pdf = parsed_data_list[current_index]
-    
-    # Get logged in user's name
-    db = get_db()
     try:
-        cursor = db.cursor()
-        cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
-        user = cursor.fetchone()
-        logged_in_user = user[0] if user else None
-    except Exception as e:
-        app.logger.error(f"Error fetching user info: {str(e)}")
-        return jsonify({'error': 'Error fetching user info'}), 500
-    finally:
-        cursor.close()
-
-    if request.method == 'POST':
-        if not session.get('user_id'):
+        if 'logged_in' not in session:
             return redirect(url_for('login'))
-        
-        # Process form data
-        form_data = {
-            'company_name': request.form.get('company_name', 'N/A'),
-            'customer': request.form.get('customer', 'N/A'),
-            'order_date': request.form.get('order_date', 'N/A'),
-            'sales_person': request.form.get('sales_person', 'N/A'),
-            'rq_invoice': request.form.get('rq_invoice', 'N/A'),
-            'total_price': float(request.form.get('total_price', 0)),
-            'accessories_prices': request.form.get('accessories_prices', ''),
-            'upgrades_count': int(request.form.get('upgrades_count', 0)),
-            'activations_count': int(request.form.get('activations_count', 0)),
-            'ppp_present': 'ppp_present' in request.form,
-            'activation_fee_sum': float(request.form.get('activation_fee_sum', 0))
-        }
 
-        imei_iccid_pairs = current_pdf.get('imei_iccid_pairs', [])
-        
-        # Convert pairs to JSON string for storage
-        imei_iccid_json = json.dumps(imei_iccid_pairs)
+        if 'parsed_data_list' not in session:
+            return redirect(url_for('upload_pdf'))
 
-        # Save to database
-        try:
-            cursor = db.cursor()
-            cursor.execute('''
-                INSERT INTO parsed_receipts (
-                    company_name, customer, order_date, sales_person, rq_invoice, 
-                    total_price, accessory_prices, upgrades_count, activations_count, 
-                    ppp_present, activation_fee_sum, user_id, imei_iccid_pairs
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-            ''', (
-                form_data['company_name'], form_data['customer'], form_data['order_date'],
-                form_data['sales_person'], form_data['rq_invoice'], form_data['total_price'],
-                form_data['accessories_prices'], form_data['upgrades_count'],
-                form_data['activations_count'], form_data['ppp_present'],
-                form_data['activation_fee_sum'], current_user.id, imei_iccid_json
-            ))
-            db.commit()
-            app.logger.info(f"Successfully inserted data for {form_data['company_name']} from {logged_in_user}")
-        except Exception as e:
-            app.logger.error(f"Error inserting data into database: {str(e)}")
-            db.rollback()
-            return jsonify({'error': 'Error saving data to the database'}), 500
-        finally:
-            cursor.close()
-        
-        # Move to next PDF
-        session['current_pdf_index'] = current_index + 1
-        
-        if current_index + 1 >= len(parsed_data_list):
-            # All PDFs processed
+        parsed_data_list = session.get('parsed_data_list', [])
+        current_index = session.get('current_pdf_index', 0)
+
+        if current_index >= len(parsed_data_list):
+            # All PDFs have been processed
             session.pop('parsed_data_list', None)
             session.pop('current_pdf_index', None)
             return redirect(url_for('view_receipts'))
-        
-        return redirect(url_for('confirm_receipt'))
-    
-    # For GET request, display the current PDF's data
-    current_pdf['logged_in_user'] = logged_in_user
-    total_pdfs = len(parsed_data_list)
-    current_number = current_index + 1
-    
-    return render_template('confirm_receipt.html', 
-                         current_user=logged_in_user,
-                         total_pdfs=total_pdfs,
-                         current_pdf_number=current_number,
-                         **current_pdf)
+
+        # Get current PDF data
+        current_pdf = parsed_data_list[current_index]
+
+        # Get logged-in user's name
+        db = get_db()
+        if db is None:
+            app.logger.error("Database connection error")
+            return "Database connection error", 500
+
+        with db.cursor() as cursor:
+            cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
+            user = cursor.fetchone()
+            logged_in_user = user[0] if user else 'User'
+
+        if request.method == 'POST':
+            if not session.get('user_id'):
+                return redirect(url_for('login'))
+
+            # Process form data
+            form_data = {
+                'company_name': request.form.get('company_name', 'N/A'),
+                'customer': request.form.get('customer', 'N/A'),
+                'order_date': request.form.get('order_date', 'N/A'),
+                'sales_person': request.form.get('sales_person', 'N/A'),
+                'rq_invoice': request.form.get('rq_invoice', 'N/A'),
+                'total_price': float(request.form.get('total_price', 0)),
+                'accessories_prices': request.form.get('accessories_prices', ''),
+                'upgrades_count': int(request.form.get('upgrades_count', 0)),
+                'activations_count': int(request.form.get('activations_count', 0)),
+                'ppp_present': 'ppp_present' in request.form,
+                'activation_fee_sum': float(request.form.get('activation_fee_sum', 0))
+            }
+
+            imei_iccid_pairs = current_pdf.get('imei_iccid_pairs', [])
+
+            # Convert pairs to JSON string for storage
+            imei_iccid_json = json.dumps(imei_iccid_pairs)
+
+            # Save to database
+            try:
+                with db.cursor() as cursor:
+                    cursor.execute('''
+                        INSERT INTO parsed_receipts (
+                            company_name, customer, order_date, sales_person, rq_invoice, 
+                            total_price, accessory_prices, upgrades_count, activations_count, 
+                            ppp_present, activation_fee_sum, user_id, imei_iccid_pairs
+                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''', (
+                        form_data['company_name'], form_data['customer'], form_data['order_date'],
+                        form_data['sales_person'], form_data['rq_invoice'], form_data['total_price'],
+                        form_data['accessories_prices'], form_data['upgrades_count'],
+                        form_data['activations_count'], form_data['ppp_present'],
+                        form_data['activation_fee_sum'], current_user.id, imei_iccid_json
+                    ))
+                db.commit()
+                app.logger.info(f"Successfully inserted data for {form_data['company_name']} from {logged_in_user}")
+            except Exception as e:
+                app.logger.error(f"Error inserting data into database: {str(e)}")
+                db.rollback()
+                return jsonify({'error': 'Error saving data to the database'}), 500
+
+            # Move to next PDF
+            session['current_pdf_index'] = current_index + 1
+
+            if current_index + 1 >= len(parsed_data_list):
+                # All PDFs processed
+                session.pop('parsed_data_list', None)
+                session.pop('current_pdf_index', None)
+                return redirect(url_for('view_receipts'))
+
+            return redirect(url_for('confirm_receipt'))
+
+        # For GET request, display the current PDF's data
+        current_pdf['logged_in_user'] = logged_in_user
+        total_pdfs = len(parsed_data_list)
+        current_number = current_index + 1
+
+        return render_template('confirm_receipt.html',
+                              current_user=logged_in_user,
+                              total_pdfs=total_pdfs,
+                              current_pdf_number=current_number,
+                              **current_pdf)
+
+    except Exception as e:
+        app.logger.error(f"Unexpected error in confirm_receipt: {str(e)}")
+        return jsonify({'error': 'An unexpected error occurred during confirmation'}), 500
 
 @app.route('/view_receipts')
 @login_required
