@@ -1285,11 +1285,17 @@ def confirm_receipt():
     
     # Get logged in user's name
     db = get_db()
-    cursor = db.cursor()
-    cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
-    user = cursor.fetchone()
-    logged_in_user = user[0] if user else None
-    
+    try:
+        cursor = db.cursor()
+        cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
+        user = cursor.fetchone()
+        logged_in_user = user[0] if user else None
+    except Exception as e:
+        app.logger.error(f"Error fetching user info: {str(e)}")
+        return jsonify({'error': 'Error fetching user info'}), 500
+    finally:
+        cursor.close()
+
     if request.method == 'POST':
         if not session.get('user_id'):
             return redirect(url_for('login'))
@@ -1313,24 +1319,31 @@ def confirm_receipt():
         
         # Convert pairs to JSON string for storage
         imei_iccid_json = json.dumps(imei_iccid_pairs)
-        
-        
+
         # Save to database
-        cursor.execute('''
-            INSERT INTO parsed_receipts (
-                company_name, customer, order_date, sales_person, rq_invoice, 
-                total_price, accessory_prices, upgrades_count, activations_count, 
-                ppp_present, activation_fee_sum, user_id, imei_iccid_pairs
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-        ''', (
-            form_data['company_name'], form_data['customer'], form_data['order_date'],
-            form_data['sales_person'], form_data['rq_invoice'], form_data['total_price'],
-            form_data['accessories_prices'], form_data['upgrades_count'],
-            form_data['activations_count'], form_data['ppp_present'],
-            form_data['activation_fee_sum'], current_user.id, imei_iccid_json
-        ))
-        
-        db.commit()
+        try:
+            cursor = db.cursor()
+            cursor.execute('''
+                INSERT INTO parsed_receipts (
+                    company_name, customer, order_date, sales_person, rq_invoice, 
+                    total_price, accessory_prices, upgrades_count, activations_count, 
+                    ppp_present, activation_fee_sum, user_id, imei_iccid_pairs
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ''', (
+                form_data['company_name'], form_data['customer'], form_data['order_date'],
+                form_data['sales_person'], form_data['rq_invoice'], form_data['total_price'],
+                form_data['accessories_prices'], form_data['upgrades_count'],
+                form_data['activations_count'], form_data['ppp_present'],
+                form_data['activation_fee_sum'], current_user.id, imei_iccid_json
+            ))
+            db.commit()
+            app.logger.info(f"Successfully inserted data for {form_data['company_name']} from {logged_in_user}")
+        except Exception as e:
+            app.logger.error(f"Error inserting data into database: {str(e)}")
+            db.rollback()
+            return jsonify({'error': 'Error saving data to the database'}), 500
+        finally:
+            cursor.close()
         
         # Move to next PDF
         session['current_pdf_index'] = current_index + 1
