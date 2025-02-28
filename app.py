@@ -1230,17 +1230,6 @@ def upload_pdf():
         app.logger.error(f"Unexpected error in upload: {str(e)}")
         return jsonify({'error': 'An unexpected error occurred during upload'}), 500
 
-result = extract_info_from_pdf(file_stream)
-app.logger.info(f"Extracted Data: {result}")
-
-if not all(result):  
-    raise ValueError(f"Failed to extract required information. Extracted: {result}")    
-
-
-with open("/mnt/data/ABO - 1.8.471.pdf", "rb") as file:
-    file_stream = io.BytesIO(file.read())
-    result = extract_info_from_pdf(file_stream)
-    print("Extracted Data:", result)
 
 @app.route('/confirm', methods=['GET', 'POST'])
 @login_required
