@@ -1122,116 +1122,97 @@ def calculate_accessories(pdf_text: str) -> Tuple[float, List[float]]:
 @app.route('/upload', methods=['GET', 'POST'])
 @login_required
 def upload_pdf():
+    db = None
     try:
         if request.method == 'GET':
             db = get_db()
             if db is None:
-                app.logger.error("Database connection error")
-                return "Database connection error", 500
+                flash("Database connection error", "error")
+                return render_template('error.html'), 500
 
             with db.cursor() as cursor:
                 cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
                 user = cursor.fetchone()
-                current_user_name = user[0] if user else 'User'  # Avoid conflicting variable names
+                current_user_name = user[0] if user else 'User'
 
             return render_template('upload.html', current_user=current_user_name)
 
-        # Handle POST request (File Upload)
+        # Handle POST (upload)
         if not request.files:
-            return jsonify({'error': 'No files were uploaded'}), 400
+            flash("No files uploaded", "error")
+            return redirect(request.url)
 
         files = request.files.getlist('pdf[]') if 'pdf[]' in request.files else [request.files['pdf']]
         if not any(file.filename for file in files):
-            return jsonify({'error': 'No valid files selected'}), 400
+            flash("No valid files selected", "error")
+            return redirect(request.url)
 
         uploaded_files, errors, parsed_data_list = [], [], []
-        app.logger.info(f"Processing {len(files)} files")
 
         for file in files:
-            if file and file.filename and allowed_file(file.filename):  # Ensure allowed_file() is defined
-                try:
+            try:
+                if file and allowed_file(file.filename):
                     filename = secure_filename(file.filename)
                     file_content = file.read()
                     if not file_content:
                         raise ValueError("Empty file")
 
+                    reader = PyPDF2.PdfReader(io.BytesIO(file_content))
+                    if not reader.pages:
+                        raise ValueError("PDF has no pages")
+
+                    pdf_text = "".join(page.extract_text() for page in reader.pages if page.extract_text())
+                    if not pdf_text.strip():
+                        raise ValueError("PDF contains no text")
+
+                    # Rewind and extract
                     file_stream = io.BytesIO(file_content)
-                    
-                    # Validate PDF format
-                    try:
-                        reader = PyPDF2.PdfReader(file_stream)
-                        if len(reader.pages) == 0:
-                            raise ValueError("PDF has no pages")
+                    result = extract_info_from_pdf(file_stream)
+                    if not all(result):
+                        raise ValueError("Missing extracted info")
 
-                        pdf_text = "".join(page.extract_text() for page in reader.pages)
-                        if not pdf_text.strip():
-                            raise ValueError("PDF contains no text")
+                    (company_name, customer, order_date, sales_person, rq_invoice, 
+                     total_price, accessories_prices, upgrades_count, activations_count, 
+                     ppp_present, pairs, activation_fee_sum) = result
 
-                        file_stream.seek(0)
-                        result = extract_info_from_pdf(file_stream)
-                        app.logger.debug(f"Extracted Data: {result}")
+                    parsed_data_list.append({
+                        'filename': filename,
+                        'company_name': company_name,
+                        'customer': customer,
+                        'order_date': order_date,
+                        'sales_person': sales_person,
+                        'rq_invoice': rq_invoice,
+                        'total_price': total_price,
+                        'accessories_prices': accessories_prices,
+                        'upgrades_count': upgrades_count,
+                        'activations_count': activations_count,
+                        'ppp_present': ppp_present,
+                        'activation_fee_sum': activation_fee_sum,
+                        'imei_iccid_pairs': pairs,
+                        'pdf_text': pdf_text
+                    })
 
-                        if not all(result):
-                            raise ValueError(f"Failed to extract required information from {file.filename}: {result}")
-
-                        (company_name, customer, order_date, sales_person, rq_invoice, 
-                         total_price, accessories_prices, upgrades_count, activations_count, 
-                         ppp_present, pairs, activation_fee_sum) = result
-
-                        parsed_data_list.append({
-                            'filename': filename,
-                            'company_name': company_name,
-                            'customer': customer,
-                            'order_date': order_date,
-                            'sales_person': sales_person,
-                            'rq_invoice': rq_invoice,
-                            'total_price': total_price,
-                            'accessories_prices': accessories_prices,
-                            'upgrades_count': upgrades_count,
-                            'activations_count': activations_count,
-                            'ppp_present': ppp_present,
-                            'activation_fee_sum': activation_fee_sum,
-                            'imei_iccid_pairs': pairs,
-                            'pdf_text': pdf_text
-                        })
-
-                        uploaded_files.append(filename)
-                        app.logger.info(f"Successfully processed {filename}")
-
-                    except PdfReadError as e:
-                        raise ValueError(f"Invalid PDF format: {str(e)}")  # Use imported PdfReadError
-
-                except Exception as e:
-                    app.logger.error(f"Error processing {file.filename}: {str(e)}")
-                    errors.append(f"Error processing {file.filename}: {str(e)}")
-            else:
-                errors.append(f"Invalid file: {file.filename if file.filename else 'No file selected'}")
+                    uploaded_files.append(filename)
+                else:
+                    raise ValueError("Invalid file format")
+            except Exception as e:
+                errors.append(f"{file.filename}: {str(e)}")
 
         if not parsed_data_list:
-            return jsonify({'error': ' | '.join(errors) if errors else 'No valid files were processed'}), 400
+            flash(" | ".join(errors), "error")
+            return redirect(request.url)
 
-        # Store parsed data in session safely
-        try:
-            session['parsed_data_list'] = parsed_data_list
-            session['current_pdf_index'] = 0
-            session.modified = True
-        except Exception as e:
-            app.logger.error(f"Session storage error: {str(e)}")
-            return jsonify({'error': 'Error storing processed data'}), 500
+        session['parsed_data_list'] = parsed_data_list
+        session['current_pdf_index'] = 0
+        session.modified = True
 
-        response_data = {
-            'status': 'success',
-            'message': f'Successfully processed {len(uploaded_files)} files',
-            'uploaded': uploaded_files,
-            'redirect': url_for('confirm_receipt')
-        }
-        app.logger.info(f"Upload complete: {response_data}")
-        return jsonify(response_data)
+        flash(f"Successfully processed {len(uploaded_files)} file(s)", "success")
+        return redirect(url_for('confirm_receipt'))
 
     except Exception as e:
-        app.logger.error(f"Unexpected error in upload: {str(e)}")
-        return jsonify({'error': 'An unexpected error occurred during upload'}), 500
-
+        app.logger.error(f"Upload error: {str(e)}")
+        flash("Unexpected server error during upload", "error")
+        return render_template('error.html'), 500
 
 def extract_info_from_pdf(file_stream):
     try:
