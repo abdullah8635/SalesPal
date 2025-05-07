@@ -424,7 +424,7 @@
                 </a>
                 
                 <form action="{{ url_for('upload_pdf') }}" method="POST" enctype="multipart/form-data" class="upload-form" id="uploadForm">
-                    <input type="file" name="pdf" id="pdf" accept=".pdf" required multiple>
+                    <input type="file" name="pdf[]" id="pdf" accept=".pdf" required multiple>
                     
                     <div class="drop-zone" id="dropZone">
                         <div class="drop-zone-icon">📄</div>
