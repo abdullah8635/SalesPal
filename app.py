@@ -1126,7 +1126,7 @@ def upload_pdf():
             db = get_db()
             if db is None:
                 flash("Database connection error", "error")
-                return jsonify({'error': str(e)}), 400
+                return jsonify({'error': "Database connection error"}), 400
 
             with db.cursor() as cursor:
                 cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
@@ -1137,13 +1137,11 @@ def upload_pdf():
 
         # Handle POST (upload)
         if not request.files:
-            flash("No files uploaded", "error")
-            return redirect(request.url)
+            return jsonify({'success': False, 'message': 'No files uploaded'}), 400
 
         files = request.files.getlist('pdf[]') if 'pdf[]' in request.files else [request.files['pdf']]
         if not any(file.filename for file in files):
-            flash("No valid files selected", "error")
-            return redirect(request.url)
+            return jsonify({'success': False, 'message': 'No valid files selected'}), 400
 
         uploaded_files, errors, parsed_data_list = [], [], []
 
@@ -1166,13 +1164,16 @@ def upload_pdf():
                     # Rewind and extract
                     file_stream = io.BytesIO(file_content)
                     result = extract_info_from_pdf(file_stream)
+
+                    # Unpack the result first
+                    (company_name, customer, order_date, sales_person, rq_invoice,
+                     total_price, accessories_prices, upgrades_count, activations_count,
+                     ppp_present, pairs, activation_fee_sum) = result
+
+                    # Now check if required fields are present
                     required_fields = [company_name, customer, order_date, sales_person, rq_invoice]
                     if not all(required_fields):
                         raise ValueError("Missing one or more required fields in PDF")
-
-                    (company_name, customer, order_date, sales_person, rq_invoice, 
-                     total_price, accessories_prices, upgrades_count, activations_count, 
-                     ppp_present, pairs, activation_fee_sum) = result
 
                     parsed_data_list.append({
                         'filename': filename,
@@ -1198,8 +1199,7 @@ def upload_pdf():
                 errors.append(f"{file.filename}: {str(e)}")
 
         if not parsed_data_list:
-            flash(" | ".join(errors), "error")
-            return redirect(request.url)
+            return jsonify({'success': False, 'errors': errors}), 400
 
         session['parsed_data_list'] = parsed_data_list
         session['current_pdf_index'] = 0
@@ -1210,7 +1210,6 @@ def upload_pdf():
 
     except Exception as e:
         app.logger.error(f"Upload error: {str(e)}")
-        app.logger.debug(f"Extracted result: {result}")
         flash("Unexpected server error during upload", "error")
         return jsonify({'error': str(e)}), 400
 
