@@ -102,7 +102,6 @@ def block_suspicious_paths():
     
     for path in suspicious_paths:
         if path in request.path:
-            app.logger.warning(f"Blocked suspicious path: {request.path}")
             abort(404)
           
 @app.errorhandler(500)
