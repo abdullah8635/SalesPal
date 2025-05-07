@@ -1126,7 +1126,7 @@ def upload_pdf():
             db = get_db()
             if db is None:
                 flash("Database connection error", "error")
-                return render_template('error.html'), 500
+                return jsonify({'error': str(e)}), 400
 
             with db.cursor() as cursor:
                 cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
@@ -1210,8 +1210,9 @@ def upload_pdf():
 
     except Exception as e:
         app.logger.error(f"Upload error: {str(e)}")
+        app.logger.debug(f"Extracted result: {result}")
         flash("Unexpected server error during upload", "error")
-        return render_template('error.html'), 500
+        return jsonify({'error': str(e)}), 400
 
 def extract_info_from_pdf(file_stream):
     try:
