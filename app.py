@@ -85,8 +85,7 @@ def get_db_connection():
             return_db(conn)
 @app.errorhandler(404)
 def handle_404(e):
-    # Log the suspicious request
-    app.logger.warning(f"Suspicious 404 request: {request.url}")
+    # Log the suspicious reques
     
     # Optional: Implement more sophisticated blocking
     # For example, block IPs with too many 404 requests
