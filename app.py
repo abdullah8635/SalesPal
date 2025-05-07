@@ -1166,8 +1166,9 @@ def upload_pdf():
                     # Rewind and extract
                     file_stream = io.BytesIO(file_content)
                     result = extract_info_from_pdf(file_stream)
-                    if not all(result):
-                        raise ValueError("Missing extracted info")
+                    required_fields = [company_name, customer, order_date, sales_person, rq_invoice]
+                    if not all(required_fields):
+                        raise ValueError("Missing one or more required fields in PDF")
 
                     (company_name, customer, order_date, sales_person, rq_invoice, 
                      total_price, accessories_prices, upgrades_count, activations_count, 
