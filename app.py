@@ -1216,30 +1216,55 @@ def upload_pdf():
         flash(f"Upload failed: {str(e)}", "error")
         return render_template('upload.html', current_user=current_user_name, error=str(e)), 400
 
+import re
+
 def extract_info_from_pdf(file_stream):
     try:
-        # Example extraction logic (modify as per your actual implementation)
-        # Here we assume you extract relevant data from the PDF and return it
-        # This is just a placeholder logic
-        app.logger.debug("Extracting data from PDF")
-        
-        # Extract the required fields (example placeholders)
-        company_name = "Example Company"
-        customer = "Customer Name"
-        order_date = "2025-02-28"
-        sales_person = "Sales Person Name"
-        rq_invoice = "12345"
-        total_price = 1000.00
-        accessories_prices = 150.00
-        upgrades_count = 3
-        activations_count = 5
-        ppp_present = True
-        pairs = [{"imei": "1234567890", "iccid": "9876543210"}]
-        activation_fee_sum = 50.00
-        # Return extracted data
-        return [company_name, customer, order_date, sales_person, rq_invoice, 
-                total_price, accessories_prices, upgrades_count, activations_count, 
+        reader = PyPDF2.PdfReader(file_stream)
+        pdf_text = "".join(page.extract_text() or "" for page in reader.pages)
+
+        # Example regex parsing — update to your PDF structure
+        company_name = re.search(r'Company:\s*(.*)', pdf_text)
+        company_name = company_name.group(1).strip() if company_name else None
+
+        customer = re.search(r'Customer:\s*(.*)', pdf_text)
+        customer = customer.group(1).strip() if customer else None
+
+        order_date = re.search(r'Order Date:\s*(.*)', pdf_text)
+        order_date = order_date.group(1).strip() if order_date else None
+
+        sales_person = re.search(r'Sales Person:\s*(.*)', pdf_text)
+        sales_person = sales_person.group(1).strip() if sales_person else None
+
+        rq_invoice = re.search(r'RQ Invoice:\s*(.*)', pdf_text)
+        rq_invoice = rq_invoice.group(1).strip() if rq_invoice else None
+
+        total_price = re.search(r'Total Price:\s*\$?([\d.,]+)', pdf_text)
+        total_price = float(total_price.group(1).replace(',', '')) if total_price else 0.0
+
+        accessories_prices = re.search(r'Accessories Prices:\s*\$?([\d.,]+)', pdf_text)
+        accessories_prices = float(accessories_prices.group(1).replace(',', '')) if accessories_prices else 0.0
+
+        upgrades_count = re.search(r'Upgrades Count:\s*(\d+)', pdf_text)
+        upgrades_count = int(upgrades_count.group(1)) if upgrades_count else 0
+
+        activations_count = re.search(r'Activations Count:\s*(\d+)', pdf_text)
+        activations_count = int(activations_count.group(1)) if activations_count else 0
+
+        ppp_present = re.search(r'PPP Present:\s*(Yes|No)', pdf_text, re.IGNORECASE)
+        ppp_present = (ppp_present.group(1).lower() == 'yes') if ppp_present else False
+
+        activation_fee_sum = re.search(r'Activation Fee Sum:\s*\$?([\d.,]+)', pdf_text)
+        activation_fee_sum = float(activation_fee_sum.group(1).replace(',', '')) if activation_fee_sum else 0.0
+
+        pairs = []
+        for match in re.finditer(r'IMEI:\s*(\d+)\s*ICCID:\s*(\d+)', pdf_text):
+            pairs.append({'imei': match.group(1), 'iccid': match.group(2)})
+
+        return [company_name, customer, order_date, sales_person, rq_invoice,
+                total_price, accessories_prices, upgrades_count, activations_count,
                 ppp_present, pairs, activation_fee_sum]
+
     except Exception as e:
         app.logger.error(f"Error extracting data from PDF: {str(e)}")
         raise ValueError("Error during PDF extraction")
