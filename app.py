@@ -1113,11 +1113,16 @@ def upload_pdf():
         session.modified = True
 
         return jsonify({
-            'success': True,
-            'redirect_url': url_for('confirm_receipt'),
-            'uploaded': uploaded_files,
-            'errors': errors
-        }), 200
+            "success": True,
+            "message": "Files uploaded successfully",
+            "redirect_url": url_for("confirm_receipt")
+        })
+
+        return jsonify({
+            "success": False,
+            "message": "Parsing failed for all files",
+            "errors": ["File XYZ failed parsing"]
+        }), 400
 
     except Exception as e:
         app.logger.error(f"Upload error: {str(e)}")
