@@ -1224,7 +1224,18 @@ def extract_info_from_pdf(file_stream):
         app.logger.debug("Extracting data from PDF")
         
         # Extract the required fields (example placeholders)
-
+        company_name = "Example Company"
+        customer = "Customer Name"
+        order_date = "2025-02-28"
+        sales_person = "Sales Person Name"
+        rq_invoice = "12345"
+        total_price = 1000.00
+        accessories_prices = 150.00
+        upgrades_count = 3
+        activations_count = 5
+        ppp_present = True
+        pairs = [{"imei": "1234567890", "iccid": "9876543210"}]
+        activation_fee_sum = 50.00
         # Return extracted data
         return [company_name, customer, order_date, sales_person, rq_invoice, 
                 total_price, accessories_prices, upgrades_count, activations_count, 
