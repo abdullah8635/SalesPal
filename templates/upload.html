@@ -624,8 +624,8 @@ uploadForm.addEventListener('submit', async function(e) {
             throw new Error('Server returned an invalid response format');
         }
 
-        if (!response.ok) {
-            throw new Error(result.error || 'Upload failed');
+        if (!response.ok || !result.success) {
+            throw new Error(result.message || result.error || 'Upload failed');
         }
 
         if (result.redirect_url) {
