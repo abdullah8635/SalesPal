@@ -623,7 +623,10 @@ uploadForm.addEventListener('submit', async function(e) {
             console.log('Raw response:', responseText);
             throw new Error('Server returned an invalid response format');
         }
-
+        
+        console.log('Response OK:', response.ok);
+        console.log('Parsed result:', result);
+        
         if (!response.ok || !result.success) {
             throw new Error(result.message || result.error || 'Upload failed');
         }
