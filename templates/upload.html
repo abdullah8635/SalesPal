@@ -631,7 +631,7 @@ uploadForm.addEventListener('submit', async function(e) {
         if (result.redirect) {
             showSuccess(result.message || 'Files uploaded successfully!');
             setTimeout(() => {
-                window.location.href = result.redirect;
+                window.location.href = result.redirect_url;
             }, 1000);
         } else {
             showSuccess(result.message || 'Files uploaded successfully!');
