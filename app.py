@@ -991,6 +991,7 @@ def delete_account(user_id):
             cursor.close()
         if 'db' in locals():
             db.close()
+          
 @app.route('/logout')
 def logout():
     session.pop('logged_in', None)
@@ -1130,7 +1131,10 @@ def extract_info_from_pdf(file_stream):
         reader = PyPDF2.PdfReader(file_stream)
         pdf_text = "".join(page.extract_text() or "" for page in reader.pages)
 
-        # Example regex parsing — update to your PDF structure
+        # Use calculate_accessories to parse accessory data from raw text
+        accessories_total, accessory_prices_list = calculate_accessories(pdf_text)
+
+        # Extract other fields
         company_name = re.search(r'Company:\s*(.*)', pdf_text)
         company_name = company_name.group(1).strip() if company_name else None
 
@@ -1149,9 +1153,6 @@ def extract_info_from_pdf(file_stream):
         total_price = re.search(r'Total Price:\s*\$?([\d.,]+)', pdf_text)
         total_price = float(total_price.group(1).replace(',', '')) if total_price else 0.0
 
-        accessories_prices = re.search(r'Accessories Prices:\s*\$?([\d.,]+)', pdf_text)
-        accessories_prices = float(accessories_prices.group(1).replace(',', '')) if accessories_prices else 0.0
-
         upgrades_count = re.search(r'Upgrades Count:\s*(\d+)', pdf_text)
         upgrades_count = int(upgrades_count.group(1)) if upgrades_count else 0
 
@@ -1168,9 +1169,20 @@ def extract_info_from_pdf(file_stream):
         for match in re.finditer(r'IMEI:\s*(\d+)\s*ICCID:\s*(\d+)', pdf_text):
             pairs.append({'imei': match.group(1), 'iccid': match.group(2)})
 
-        return [company_name, customer, order_date, sales_person, rq_invoice,
-                total_price, accessories_prices, upgrades_count, activations_count,
-                ppp_present, pairs, activation_fee_sum]
+        return [
+            company_name,
+            customer,
+            order_date,
+            sales_person,
+            rq_invoice,
+            total_price,
+            accessory_prices_list,
+            upgrades_count,
+            activations_count,
+            ppp_present,
+            pairs,
+            activation_fee_sum
+        ]
 
     except Exception as e:
         app.logger.error(f"Error extracting data from PDF: {str(e)}")
