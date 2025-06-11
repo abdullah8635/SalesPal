@@ -628,7 +628,7 @@ uploadForm.addEventListener('submit', async function(e) {
             throw new Error(result.error || 'Upload failed');
         }
 
-        if (result.redirect) {
+        if (result.redirect_url) {
             showSuccess(result.message || 'Files uploaded successfully!');
             setTimeout(() => {
                 window.location.href = result.redirect_url;
