@@ -998,105 +998,14 @@ def logout():
     session.pop('admin', None)
     return redirect(url_for('login'))
 
-def extract_imei_iccid_pairs(text):
-    """
-    Extract IMEI and ICCID pairs in order of appearance in the document.
-    """
-    pairs = []
-    lines = text.split('\n')
-    current_imei = None
-    
-    for line in lines:
-        if 'IMEI:' in line:
-            imei_match = re.search(r'IMEI:(\d{15})', line)
-            if imei_match:
-                current_imei = imei_match.group(1)
-        elif 'ICCID:' in line and current_imei:
-            iccid_match = re.search(r'ICCID:(\d{20})', line)
-            if iccid_match:
-                iccid = iccid_match.group(1)
-                pairs.append({
-                    'imei': current_imei,
-                    'iccid': iccid
-                })
-                current_imei = None  # Reset current_imei after creating a pair
-    
-    return pairs
-
-def pair_imei_iccid(imeis: List[str], iccids: List[str]) -> List[Dict[str, str]]:
-    """Create pairs of IMEI and ICCID numbers preserving order."""
-    pairs = []
-    
-    # Create pairs while maintaining order
-    for i in range(min(len(imeis), len(iccids))):
-        pairs.append({
-            'imei': imeis[i],
-            'iccid': iccids[i]
-        })
-    
-    return pairs
-
-def extract_info_from_pdf(pdf_file) -> Tuple:
-    """Extract all information from PDF file."""
-    reader = PyPDF2.PdfReader(pdf_file)
-    pdf_text = ""
-    
-    for page in reader.pages:
-        pdf_text += page.extract_text()
-
-    # Regular expression patterns
-    company_pattern = r"Sale\nR\d+\n(\d{3}:\s[A-Za-z\s]+)"
-    customer_pattern = r"Customer\s*(.*%s)(%s:\n|\s*\()"
-    order_date_pattern = r"Order Date\s*(\d{1,2}-\w{3}-\d{4}\s*\d{1,2}:\d{2}:\d{2}\s*\w*)"
-    sales_person_pattern = r"Tendered By:\s*(.*%s)(%s:\n|$)"
-    rq_invoice_pattern = r"Sale\n(R\d+)\n"
-    
-    # Get IMEI/ICCID pairs
-    imei_iccid_pairs = extract_imei_iccid_pairs(pdf_text)
-    
-    # Other patterns
-    upgrades_pattern = r"\bUpgrade Fee\b"
-    activations_pattern = r"\bActivation Fee\b"
-    ppp_pattern = r"\bLease\b"
-    activation_fee_pattern = r"Fee\s*\d\s*@\$\s*([\d.]+)"
-
-    # Extract data
-    company_name = re.search(company_pattern, pdf_text, re.DOTALL)
-    customer = re.search(customer_pattern, pdf_text, re.DOTALL)
-    order_date = re.search(order_date_pattern, pdf_text, re.DOTALL)
-    sales_person = re.search(sales_person_pattern, pdf_text, re.DOTALL)
-    rq_invoice = re.search(rq_invoice_pattern, pdf_text, re.DOTALL)
-    
-    # Count occurrences
-    upgrades_count = len(re.findall(upgrades_pattern, pdf_text, re.IGNORECASE))
-    activations_count = len(re.findall(activations_pattern, pdf_text, re.IGNORECASE))
-    ppp_present = bool(re.search(ppp_pattern, pdf_text, re.IGNORECASE))
-    
-    # Calculate activation fees
-    activation_fees = re.findall(activation_fee_pattern, pdf_text)
-    activation_fee_sum = round(sum(float(fee) for fee in activation_fees), 2)
-
-    # Calculate accessories (moved to separate function)
-    total_price, accessory_prices = calculate_accessories(pdf_text)
-
-    return (
-        company_name.group(1).strip() if company_name else "N/A",
-        customer.group(1).strip() if customer else "N/A",
-        order_date.group(1).strip() if order_date else "N/A",
-        sales_person.group(1).strip() if sales_person else "N/A",
-        rq_invoice.group(1).strip() if rq_invoice else "N/A",
-        total_price,
-        accessory_prices,
-        upgrades_count,
-        activations_count,
-        ppp_present,
-        imei_iccid_pairs,
-        activation_fee_sum
-    )
-
 def calculate_accessories(pdf_text: str) -> Tuple[float, List[float]]:
     """Calculate accessory prices from PDF text."""
-    accessory_pattern = r'([A-Z0-9]+)\n(.*%s)\n(%s:.*%s@\$(\d+\.\d+)).*%sItem Total\s+\$(\d+\.\d+)'
+    accessory_pattern = (
+        r'([A-Z0-9]+)\n'                    # SKU
+        r'(.*?)\n'                          # Description
+        r'.*?@\$\s*(\d+\.\d{2}).*?'         # Unit Price
+        r'Item Total\s+\$\s*(\d+\.\d{2})'   # Total Price
+    )
     non_accessory_identifiers = [
         'DEFBYOD', 'UNLCOR', 'UNLMORE', 'ACTIVATION',
         'IMEI:', 'ICCID:', 'SIM', 'STHN', 'SSGN',
@@ -1215,8 +1124,6 @@ def upload_pdf():
         app.logger.error(f"Upload error: {str(e)}")
         flash(f"Upload failed: {str(e)}", "error")
         return render_template('upload.html', current_user=current_user_name, error=str(e)), 400
-
-import re
 
 def extract_info_from_pdf(file_stream):
     try:
