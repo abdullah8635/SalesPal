@@ -1036,8 +1036,7 @@ def upload_pdf():
         if request.method == 'GET':
             db = get_db()
             if db is None:
-                flash("Database connection error", "error")
-                return jsonify({'error': "Database connection error"}), 400
+                return render_template('upload.html', current_user=current_user_name, error="Database connection error")
 
             with db.cursor() as cursor:
                 cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
@@ -1048,9 +1047,7 @@ def upload_pdf():
 
         # Handle POST (upload)
         if 'pdf' not in request.files and 'pdf[]' not in request.files:
-            flash("No files uploaded", "error")
-            return redirect(request.url)
-
+            return jsonify({'success': False, 'message': 'No files uploaded'}), 400
 
         files = request.files.getlist('pdf[]') if 'pdf[]' in request.files else [request.files['pdf']]
         if not any(file and file.filename.strip() for file in files):
@@ -1070,21 +1067,17 @@ def upload_pdf():
                     if not reader.pages:
                         raise ValueError("PDF has no pages")
 
-                    pdf_text = "".join(page.extract_text() for page in reader.pages if page.extract_text())
+                    pdf_text = "".join(page.extract_text() or "" for page in reader.pages)
                     if not pdf_text.strip():
-                        app.logger.warning(f"No text extracted from {filename}")
                         raise ValueError("PDF contains no text")
 
-                    # Rewind and extract
                     file_stream = io.BytesIO(file_content)
                     result = extract_info_from_pdf(file_stream)
 
-                    # Unpack the result first
                     (company_name, customer, order_date, sales_person, rq_invoice,
                      total_price, accessories_prices, upgrades_count, activations_count,
                      ppp_present, pairs, activation_fee_sum) = result
 
-                    # Now check if required fields are present
                     required_fields = [company_name, customer, order_date, sales_person, rq_invoice]
                     if not all(required_fields):
                         raise ValueError("Missing one or more required fields in PDF")
@@ -1119,13 +1112,16 @@ def upload_pdf():
         session['current_pdf_index'] = 0
         session.modified = True
 
-        flash(f"Successfully processed {len(uploaded_files)} file(s)", "success")
-        return jsonify({'success': True, 'redirect_url': url_for('confirm_receipt')}), 200
+        return jsonify({
+            'success': True,
+            'redirect_url': url_for('confirm_receipt'),
+            'uploaded': uploaded_files,
+            'errors': errors
+        }), 200
 
     except Exception as e:
         app.logger.error(f"Upload error: {str(e)}")
-        flash(f"Upload failed: {str(e)}", "error")
-        return render_template('upload.html', current_user=current_user_name, error=str(e)), 400
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 def extract_info_from_pdf(file_stream):
     try:
