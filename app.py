@@ -752,7 +752,7 @@ def home():
             return redirect(url_for('employee_list'))
         else:
             print("Redirecting non-admin to upload PDF")
-            return redirect(url_for('upload_pdf'))
+            return redirect(url_for(''))
     
     except Exception as e:
         # Log any unexpected errors
@@ -1136,11 +1136,13 @@ def upload_pdf():
             return render_template('upload.html', current_user=current_user_name)
 
         # Handle POST (upload)
-        if not request.files:
-            return jsonify({'success': False, 'message': 'No files uploaded'}), 400
+        if 'pdf' not in request.files and 'pdf[]' not in request.files:
+            flash("No files uploaded", "error")
+            return redirect(request.url)
+
 
         files = request.files.getlist('pdf[]') if 'pdf[]' in request.files else [request.files['pdf']]
-        if not any(file.filename for file in files):
+        if not any(file and file.filename.strip() for file in files):
             return jsonify({'success': False, 'message': 'No valid files selected'}), 400
 
         uploaded_files, errors, parsed_data_list = [], [], []
@@ -1159,6 +1161,7 @@ def upload_pdf():
 
                     pdf_text = "".join(page.extract_text() for page in reader.pages if page.extract_text())
                     if not pdf_text.strip():
+                        app.logger.warning(f"No text extracted from {filename}")
                         raise ValueError("PDF contains no text")
 
                     # Rewind and extract
@@ -1206,12 +1209,12 @@ def upload_pdf():
         session.modified = True
 
         flash(f"Successfully processed {len(uploaded_files)} file(s)", "success")
-        return redirect(url_for('confirm_receipt'))
+        return jsonify({'success': True, 'redirect_url': url_for('confirm_receipt')}), 200
 
     except Exception as e:
         app.logger.error(f"Upload error: {str(e)}")
-        flash("Unexpected server error during upload", "error")
-        return jsonify({'error': str(e)}), 400
+        flash(f"Upload failed: {str(e)}", "error")
+        return render_template('upload.html', current_user=current_user_name, error=str(e)), 400
 
 def extract_info_from_pdf(file_stream):
     try:
