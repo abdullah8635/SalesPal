@@ -601,53 +601,52 @@ uploadForm.addEventListener('submit', async function(e) {
     submitButton.disabled = true;
 
     try {
-        const formData = new FormData();
-        
-        // Add each file to FormData with the correct field name
-        Array.from(filesArray).forEach(file => {
-            formData.append('pdf[]', file);
-        });
+    const formData = new FormData();
+    Array.from(filesArray).forEach(file => {
+        formData.append('pdf[]', file);
+    });
 
-        const response = await fetch(uploadForm.action, {
-            method: 'POST',
-            body: formData
-        });
+    const response = await fetch(uploadForm.action, {
+        method: 'POST',
+        body: formData
+    });
 
-        let result;
-        const responseText = await response.text();
-        
-        try {
-            result = JSON.parse(responseText);
-        } catch (parseError) {
-            console.error('JSON parse error:', parseError);
-            console.log('Raw response:', responseText);
-            throw new Error('Server returned an invalid response format');
-        }
-        
-        console.log('Response OK:', response.ok);
-        console.log('Parsed result:', result);
-        
-        if (!response.ok || !result.success) {
-            throw new Error(result.message || result.error || 'Upload failed');
-        }
+    const responseText = await response.text();
+    console.log('Raw response:', responseText);
 
-        if (result.redirect_url) {
-            showSuccess(result.message || 'Files uploaded successfully!');
-            setTimeout(() => {
-                window.location.href = result.redirect_url;
-            }, 1000);
-        } else {
-            showSuccess(result.message || 'Files uploaded successfully!');
-            // Reset the form
-            filesArray = new Set();
-            updateFilesList();
-            updateTotalSize();
-            fileInput.value = ''; // Clear the file input
-        }
-    } catch (error) {
-        console.error('Upload error:', error);
-        showError(error.message || 'Upload failed. Please try again.');
-    } finally {
+    let result;
+    try {
+        result = JSON.parse(responseText);
+    } catch (parseError) {
+        console.error('JSON parse error:', parseError);
+        showError('Invalid JSON from server');
+        return;
+    }
+
+    console.log('Parsed result:', result);
+
+    if (!response.ok || !result.success) {
+        throw new Error(result.message || result.error || 'Upload failed');
+    }
+
+    showSuccess(result.message || 'Files uploaded successfully!');
+
+    if (result.redirect_url) {
+        setTimeout(() => {
+            window.location.href = result.redirect_url;
+        }, 1000);
+    } else {
+        filesArray = new Set();
+        updateFilesList();
+        updateTotalSize();
+        fileInput.value = '';
+    }
+
+} catch (error) {
+    console.error('Upload error:', error);
+    showError(error.message || 'Upload failed. Please try again.');
+}
+ finally {
         submitButton.classList.remove('loading');
         submitButton.textContent = 'Upload Receipts';
         submitButton.disabled = false;
