@@ -1031,6 +1031,7 @@ def calculate_accessories(pdf_text: str) -> Tuple[float, List[float]]:
 @login_required
 def upload_pdf():
     db = None
+    current_user_name = 'User'
     try:
         if request.method == 'GET':
             db = get_db()
