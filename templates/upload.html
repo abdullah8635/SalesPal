@@ -614,15 +614,14 @@ uploadForm.addEventListener('submit', async function(e) {
     });
 
     const responseText = await response.text();
-    console.log('Raw response:', responseText);
-
-    let result;
+    console.log('Server response text:', responseText);
+    
     try {
-        result = JSON.parse(responseText);
-    } catch (parseError) {
-        console.error('JSON parse error:', parseError);
-        showError('Invalid JSON from server');
-        return;
+        const result = JSON.parse(responseText);
+        // use result as usual
+    } catch (err) {
+        console.error('Failed to parse JSON:', err);
+        throw new Error('Server returned invalid JSON');
     }
 
     console.log('Parsed result:', result);
