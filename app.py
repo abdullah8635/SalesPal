@@ -1026,7 +1026,6 @@ def calculate_accessories(pdf_text: str) -> Tuple[float, List[float]]:
     total_price = round(sum(accessory_prices), 2)
     return total_price, accessory_prices
 
-# PDF upload page
 @app.route('/upload', methods=['GET', 'POST'])
 @login_required
 def upload_pdf():
@@ -1045,7 +1044,7 @@ def upload_pdf():
 
             return render_template('upload.html', current_user=current_user_name)
 
-        # Handle POST (upload)
+        # POST method: handle file upload
         if 'pdf' not in request.files and 'pdf[]' not in request.files:
             return jsonify({'success': False, 'message': 'No files uploaded'}), 400
 
@@ -1106,22 +1105,26 @@ def upload_pdf():
                 errors.append(f"{file.filename}: {str(e)}")
 
         if not parsed_data_list:
-            return jsonify({'success': False, 'errors': errors}), 400
-        
+            return jsonify({
+                'success': False,
+                'message': 'Parsing failed for all files',
+                'errors': errors
+            }), 400
+
         session['parsed_data_list'] = parsed_data_list
         session['current_pdf_index'] = 0
         session.modified = True
-        
+
         return jsonify({
             "success": True,
             "message": "Files uploaded successfully",
             "redirect_url": url_for("confirm_receipt")
         })
 
-
     except Exception as e:
         app.logger.error(f"Upload error: {str(e)}")
         return jsonify({'success': False, 'message': str(e)}), 500
+
 
 def extract_info_from_pdf(file_stream):
     try:
