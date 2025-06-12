@@ -601,7 +601,7 @@ uploadForm.addEventListener('submit', async function(e) {
     submitButton.classList.add('loading');
     submitButton.textContent = 'Uploading...';
     submitButton.disabled = true;
-
+    
     try {
     const formData = new FormData();
     Array.from(filesArray).forEach(file => {
@@ -615,7 +615,8 @@ uploadForm.addEventListener('submit', async function(e) {
 
     const responseText = await response.text();
     console.log('Server response text:', responseText);
-    
+
+    let result;
     try {
         const result = JSON.parse(responseText);
         // use result as usual
