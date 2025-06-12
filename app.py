@@ -1102,6 +1102,7 @@ def upload_pdf():
                     raise ValueError("Invalid file format")
 
             except Exception as e:
+                app.logger.error(f"Error parsing {file.filename}: {str(e)}")
                 errors.append(f"{file.filename}: {str(e)}")
 
         if not parsed_data_list:
