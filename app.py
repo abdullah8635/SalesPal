@@ -1031,6 +1031,7 @@ def calculate_accessories(pdf_text: str) -> Tuple[float, List[float]]:
 def upload_pdf():
     db = None
     current_user_name = 'User'
+
     try:
         if request.method == 'GET':
             db = get_db()
@@ -1044,7 +1045,7 @@ def upload_pdf():
 
             return render_template('upload.html', current_user=current_user_name)
 
-        # POST method: handle file upload
+        # Handle POST
         if 'pdf' not in request.files and 'pdf[]' not in request.files:
             return jsonify({'success': False, 'message': 'No files uploaded'}), 400
 
@@ -1058,28 +1059,26 @@ def upload_pdf():
             try:
                 if file and allowed_file(file.filename):
                     filename = secure_filename(file.filename)
-                    file_content = file.read()
-                    if not file_content:
+                    content = file.read()
+                    if not content:
                         raise ValueError("Empty file")
 
-                    reader = PyPDF2.PdfReader(io.BytesIO(file_content))
+                    reader = PyPDF2.PdfReader(io.BytesIO(content))
                     if not reader.pages:
                         raise ValueError("PDF has no pages")
 
-                    pdf_text = "".join(page.extract_text() or "" for page in reader.pages)
-                    if not pdf_text.strip():
+                    text = ''.join(page.extract_text() or '' for page in reader.pages)
+                    if not text.strip():
                         raise ValueError("PDF contains no text")
 
-                    file_stream = io.BytesIO(file_content)
-                    result = extract_info_from_pdf(file_stream)
-
+                    parsed = extract_info_from_pdf(io.BytesIO(content))
                     (company_name, customer, order_date, sales_person, rq_invoice,
                      total_price, accessories_prices, upgrades_count, activations_count,
-                     ppp_present, pairs, activation_fee_sum) = result
+                     ppp_present, pairs, activation_fee_sum) = parsed
 
-                    required_fields = [company_name, customer, order_date, sales_person, rq_invoice]
-                    if not all(required_fields):
-                        raise ValueError("Missing one or more required fields in PDF")
+                    required = [company_name, customer, order_date, sales_person, rq_invoice]
+                    if not all(required):
+                        raise ValueError("Missing required fields in PDF")
 
                     parsed_data_list.append({
                         'filename': filename,
@@ -1095,12 +1094,13 @@ def upload_pdf():
                         'ppp_present': ppp_present,
                         'activation_fee_sum': activation_fee_sum,
                         'imei_iccid_pairs': pairs,
-                        'pdf_text': pdf_text
+                        'pdf_text': text
                     })
 
                     uploaded_files.append(filename)
                 else:
                     raise ValueError("Invalid file format")
+
             except Exception as e:
                 errors.append(f"{file.filename}: {str(e)}")
 
@@ -1116,9 +1116,9 @@ def upload_pdf():
         session.modified = True
 
         return jsonify({
-            "success": True,
-            "message": "Files uploaded successfully",
-            "redirect_url": url_for("confirm_receipt")
+            'success': True,
+            'message': 'Files uploaded successfully',
+            'redirect_url': url_for('confirm_receipt')
         })
 
     except Exception as e:
