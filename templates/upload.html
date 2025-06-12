@@ -446,11 +446,10 @@
             </div>
         </div>
     </main>
+<script>
+console.log('Upload script loaded');
 
-    <script>
-    console.log('Upload script loaded');
-        
-        const dropZone = document.getElementById('dropZone');
+const dropZone = document.getElementById('dropZone');
 const fileInput = document.getElementById('pdf');
 const selectedFiles = document.getElementById('selectedFiles');
 const submitButton = document.getElementById('submitButton');
@@ -523,7 +522,7 @@ function validateFile(file) {
         showError(`${file.name} is not a PDF file`);
         return false;
     }
-    
+
     if (file.size > 10 * 1024 * 1024) { // 10MB limit
         showError(`${file.name} exceeds 10MB size limit`);
         return false;
@@ -555,7 +554,6 @@ function updateFilesList() {
         selectedFiles.appendChild(fileItem);
     });
 
-    // Show/hide submit button based on files
     submitButton.style.display = files.length > 0 ? 'block' : 'none';
 }
 
@@ -566,15 +564,20 @@ function updateTotalSize() {
 }
 
 function showError(message) {
-    errorMessage.textContent = message;
+    if (Array.isArray(message)) {
+        message = message.join('<br>');
+    }
+
+    errorMessage.innerHTML = message;
     errorMessage.style.display = 'block';
     errorMessage.style.backgroundColor = '#f8d7da';
     errorMessage.style.color = '#721c24';
     errorMessage.style.padding = '1rem';
     errorMessage.style.borderRadius = '4px';
+
     setTimeout(() => {
         errorMessage.style.display = 'none';
-    }, 3000);
+    }, 5000);
 }
 
 function showSuccess(message) {
@@ -584,6 +587,7 @@ function showSuccess(message) {
     errorMessage.style.color = '#155724';
     errorMessage.style.padding = '1rem';
     errorMessage.style.borderRadius = '4px';
+
     setTimeout(() => {
         errorMessage.style.display = 'none';
     }, 3000);
@@ -617,7 +621,7 @@ uploadForm.addEventListener('submit', async function (e) {
 
         let result;
         try {
-            result = JSON.parse(responseText); // FIX: no `const` here
+            result = JSON.parse(responseText);
         } catch (err) {
             console.error('Failed to parse JSON:', err);
             throw new Error('Server returned invalid JSON');
@@ -626,7 +630,8 @@ uploadForm.addEventListener('submit', async function (e) {
         console.log('Parsed result:', result);
 
         if (!response.ok || !result.success) {
-            throw new Error(result.message || result.error || 'Upload failed');
+            const errorMsg = result.message || (result.errors ? result.errors.join('<br>') : 'Upload failed');
+            throw new Error(errorMsg);
         }
 
         showSuccess(result.message || 'Files uploaded successfully!');
@@ -652,6 +657,5 @@ uploadForm.addEventListener('submit', async function (e) {
     }
 });
 </script>
-
 </body>
 </html>
