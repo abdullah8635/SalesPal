@@ -344,12 +344,8 @@ except Exception as e:
 DATABASE = '/data/users.db'
 os.makedirs('/home/ubuntu/SalesPal/data', exist_ok=True)  # Create the directory if it doesn't exist
 
-ALLOWED_EXTENSIONS = {'pdf'}
-
 def allowed_file(filename):
-    """Check if the uploaded file has an allowed extension"""
-    return '.' in filename and \
-           filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+    return '.' in filename and filename.rsplit('.', 1)[1].lower() == 'pdf'
 
 @app.route('/api/update_receipt/<string:rq_invoice>', methods=['POST'])
 @login_required
@@ -1029,9 +1025,7 @@ def calculate_accessories(pdf_text: str) -> Tuple[float, List[float]]:
 @app.route('/upload', methods=['GET', 'POST'])
 @login_required
 def upload_pdf():
-    db = None
     current_user_name = 'User'
-
     try:
         if request.method == 'GET':
             db = get_db()
@@ -1045,7 +1039,7 @@ def upload_pdf():
 
             return render_template('upload.html', current_user=current_user_name)
 
-        # Handle POST
+        # POST method handling
         if 'pdf' not in request.files and 'pdf[]' not in request.files:
             return jsonify({'success': False, 'message': 'No files uploaded'}), 400
 
@@ -1053,7 +1047,8 @@ def upload_pdf():
         if not any(file and file.filename.strip() for file in files):
             return jsonify({'success': False, 'message': 'No valid files selected'}), 400
 
-        uploaded_files, errors, parsed_data_list = [], [], []
+        errors = []
+        parsed_data_list = []
 
         for file in files:
             try:
@@ -1097,10 +1092,8 @@ def upload_pdf():
                         'pdf_text': text
                     })
 
-                    uploaded_files.append(filename)
                 else:
                     raise ValueError("Invalid file format")
-
             except Exception as e:
                 app.logger.error(f"Error parsing {file.filename}: {str(e)}")
                 errors.append(f"{file.filename}: {str(e)}")
