@@ -1027,31 +1027,62 @@ def logout():
     flash('You have been logged out successfully.', 'info')
     return redirect(url_for('login'))
 
-def calculate_accessories(pdf_text: str) -> Tuple[float, List[float]]:
-    """Calculate accessory prices from PDF text."""
-    accessory_pattern = (
-        r'([A-Z0-9]+)\n'                    # SKU
-        r'(.*?)\n'                          # Description
-        r'.*?@\$\s*(\d+\.\d{2}).*?'         # Unit Price
-        r'Item Total\s+\$\s*(\d+\.\d{2})'   # Total Price
-    )
-    non_accessory_identifiers = [
-        'DEFBYOD', 'UNLCOR', 'UNLMORE', 'ACTIVATION',
-        'IMEI:', 'ICCID:', 'SIM', 'STHN', 'SSGN',
-        '55UNL', '60UNL'
+def calculate_accessories_cricket(pdf_text: str) -> Tuple[float, List[float]]:
+    """Calculate accessory prices from Cricket receipt text."""
+    
+    # Patterns for accessories (exclude phones, SIM cards, and service plans)
+    accessory_items = []
+    
+    # Look for item patterns with prices
+    # Pattern: Item name/code followed by price information
+    item_patterns = [
+        # Pattern for items like "HOL2087 Quikcell moto g 5G (2024) ADVOCATE..."
+        r'([A-Z]{3}\d+)\s+([^@]+?)\s+1\s+@\$(\d+\.?\d*)\s+\$(\d+\.?\d*)',
+        # Pattern for items with "Item Total"
+        r'([A-Z]{3}\d+).*?Item Total\s+\$(\d+\.?\d*)',
     ]
     
+    # Items to exclude (phones, SIM, service plans)
+    excluded_prefixes = ['DMTK', 'STHN', '60UNL', '55UNL', 'UNLCOR', 'UNLMORE', 'DEFBYOD']
+    excluded_keywords = ['Activation Fee', 'Motorola', 'iPhone', 'Samsung', 'SIM', 'Unlimited']
+    
     accessory_prices = []
-    for match in re.finditer(accessory_pattern, pdf_text, re.DOTALL):
-        sku = match.group(1)
-        description = match.group(2).strip()
-        final_price = float(match.group(4))
+    
+    # Find all potential accessory items
+    lines = pdf_text.split('\n')
+    i = 0
+    while i < len(lines):
+        line = lines[i].strip()
         
-        if not any(identifier in sku or identifier in description 
-                  for identifier in non_accessory_identifiers):
-            accessory_prices.append(round(final_price, 2))
+        # Look for accessory item codes
+        if re.match(r'^[A-Z]{3}\d+', line):
+            item_code = re.match(r'^([A-Z]{3}\d+)', line).group(1)
+            
+            # Skip if it's an excluded item
+            if any(item_code.startswith(prefix) for prefix in excluded_prefixes):
+                i += 1
+                continue
+            
+            # Look for the item total in the following lines
+            j = i
+            while j < min(i + 10, len(lines)):  # Look in next 10 lines
+                if 'Item Total' in lines[j]:
+                    total_match = re.search(r'Item Total\s+\$(\d+\.?\d*)', lines[j])
+                    if total_match:
+                        price = float(total_match.group(1))
+                        
+                        # Additional check to exclude service items
+                        item_description = ' '.join(lines[i:j])
+                        if not any(keyword.lower() in item_description.lower() for keyword in excluded_keywords):
+                            accessory_prices.append(price)
+                            app.logger.debug(f"Found accessory: {item_code} - ${price}")
+                        break
+                j += 1
+        i += 1
     
     total_price = round(sum(accessory_prices), 2)
+    app.logger.debug(f"Total accessories: ${total_price}, Items: {accessory_prices}")
+    
     return total_price, accessory_prices
 
 @app.route('/upload', methods=['GET', 'POST'])
@@ -1156,44 +1187,116 @@ def extract_info_from_pdf(file_stream):
     try:
         reader = PyPDF2.PdfReader(file_stream)
         pdf_text = "".join(page.extract_text() or "" for page in reader.pages)
-
-        # Use calculate_accessories to parse accessory data from raw text
-        accessories_total, accessory_prices_list = calculate_accessories(pdf_text)
-
-        # Extract other fields
-        company_name = re.search(r'Company:\s*(.*)', pdf_text)
-        company_name = company_name.group(1).strip() if company_name else None
-
-        customer = re.search(r'Customer:\s*(.*)', pdf_text)
-        customer = customer.group(1).strip() if customer else None
-
-        order_date = re.search(r'Order Date:\s*(.*)', pdf_text)
-        order_date = order_date.group(1).strip() if order_date else None
-
-        sales_person = re.search(r'Sales Person:\s*(.*)', pdf_text)
-        sales_person = sales_person.group(1).strip() if sales_person else None
-
-        rq_invoice = re.search(r'RQ Invoice:\s*(.*)', pdf_text)
-        rq_invoice = rq_invoice.group(1).strip() if rq_invoice else None
-
-        total_price = re.search(r'Total Price:\s*\$?([\d.,]+)', pdf_text)
-        total_price = float(total_price.group(1).replace(',', '')) if total_price else 0.0
-
-        upgrades_count = re.search(r'Upgrades Count:\s*(\d+)', pdf_text)
-        upgrades_count = int(upgrades_count.group(1)) if upgrades_count else 0
-
-        activations_count = re.search(r'Activations Count:\s*(\d+)', pdf_text)
-        activations_count = int(activations_count.group(1)) if activations_count else 0
-
-        ppp_present = re.search(r'PPP Present:\s*(Yes|No)', pdf_text, re.IGNORECASE)
-        ppp_present = (ppp_present.group(1).lower() == 'yes') if ppp_present else False
-
-        activation_fee_sum = re.search(r'Activation Fee Sum:\s*\$?([\d.,]+)', pdf_text)
-        activation_fee_sum = float(activation_fee_sum.group(1).replace(',', '')) if activation_fee_sum else 0.0
-
+        
+        # Log the extracted text for debugging (first 1000 chars)
+        app.logger.debug(f"PDF text preview: {pdf_text[:1000]}...")
+        
+        # Initialize default values
+        company_name = None
+        customer = None
+        order_date = None
+        sales_person = None
+        rq_invoice = None
+        total_price = 0.0
+        upgrades_count = 0
+        activations_count = 0
+        ppp_present = False
+        activation_fee_sum = 0.0
         pairs = []
-        for match in re.finditer(r'IMEI:\s*(\d+)\s*ICCID:\s*(\d+)', pdf_text):
-            pairs.append({'imei': match.group(1), 'iccid': match.group(2)})
+
+        # Extract company/store information
+        # Look for store number and location (e.g., "101: Dade City")
+        store_match = re.search(r'(\d+):\s*([A-Za-z\s]+)', pdf_text)
+        if store_match:
+            company_name = f"{store_match.group(1)}: {store_match.group(2).strip()}"
+            app.logger.debug(f"Found company: {company_name}")
+
+        # Extract customer name
+        # Look for "Customer" followed by a name
+        customer_match = re.search(r'Customer\s*\n\s*([A-Z\s]+)', pdf_text)
+        if customer_match:
+            customer = customer_match.group(1).strip()
+            app.logger.debug(f"Found customer: {customer}")
+
+        # Extract order date
+        # Look for "Order Date" followed by date
+        order_date_match = re.search(r'Order Date\s*\n\s*([0-9]{1,2}-[A-Za-z]{3}-[0-9]{4}.*)', pdf_text)
+        if order_date_match:
+            order_date = order_date_match.group(1).strip()
+            app.logger.debug(f"Found order date: {order_date}")
+
+        # Extract sales person
+        # Look for "Sales Person:" or "Tendered By:"
+        sales_person_match = re.search(r'(?:Sales Person|Tendered By):\s*\n?\s*([A-Z\s]+)', pdf_text)
+        if sales_person_match:
+            sales_person = sales_person_match.group(1).strip()
+            app.logger.debug(f"Found sales person: {sales_person}")
+
+        # Extract invoice/order number (RQ Invoice)
+        # Look for the barcode number at the top (R followed by numbers)
+        rq_invoice_match = re.search(r'R(\d+)', pdf_text)
+        if rq_invoice_match:
+            rq_invoice = f"R{rq_invoice_match.group(1)}"
+            app.logger.debug(f"Found RQ invoice: {rq_invoice}")
+
+        # Extract IMEI and ICCID pairs
+        imei_matches = re.findall(r'IMEI:(\d{15})', pdf_text)
+        iccid_matches = re.findall(r'ICCID:(\d{19,20})', pdf_text)
+        
+        # Create pairs (assuming they appear in order)
+        for i, imei in enumerate(imei_matches):
+            if i < len(iccid_matches):
+                pairs.append({'imei': imei, 'iccid': iccid_matches[i]})
+        
+        app.logger.debug(f"Found {len(pairs)} IMEI/ICCID pairs")
+
+        # Count activations and upgrades
+        # Look for activation fees to count activations
+        activation_fees = re.findall(r'Activation Fee.*?@\$(\d+\.?\d*)', pdf_text, re.DOTALL)
+        activations_count = len(activation_fees)
+        
+        # Calculate activation fee sum
+        activation_fee_sum = sum(float(fee) for fee in activation_fees if fee)
+        
+        app.logger.debug(f"Found {activations_count} activations, total fees: ${activation_fee_sum}")
+
+        # For upgrades, we need to determine if devices are upgrades vs new activations
+        # This is tricky from the receipt alone, so we'll assume all are activations for now
+        upgrades_count = 0
+
+        # Check for PPP (Protection Plan)
+        ppp_present = bool(re.search(r'Cricket Protection Plan|Protection Plan', pdf_text, re.IGNORECASE))
+        app.logger.debug(f"PPP present: {ppp_present}")
+
+        # Calculate accessory total using the new Cricket function
+        try:
+            accessories_total, accessory_prices_list = calculate_accessories_cricket(pdf_text)
+            total_price = accessories_total
+            app.logger.debug(f"Calculated accessories total: ${total_price}")
+        except Exception as e:
+            app.logger.warning(f"Error calculating accessories: {e}")
+            total_price = 0.0
+            accessory_prices_list = []
+
+        # Validate required fields
+        required_fields = [company_name, customer, order_date, sales_person, rq_invoice]
+        missing_fields = []
+        
+        if not company_name:
+            missing_fields.append("company_name")
+        if not customer:
+            missing_fields.append("customer")
+        if not order_date:
+            missing_fields.append("order_date")
+        if not sales_person:
+            missing_fields.append("sales_person")
+        if not rq_invoice:
+            missing_fields.append("rq_invoice")
+
+        if missing_fields:
+            app.logger.error(f"Missing required fields: {missing_fields}")
+            app.logger.debug(f"Extracted values - Company: {company_name}, Customer: {customer}, Date: {order_date}, Sales: {sales_person}, Invoice: {rq_invoice}")
+            raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
 
         return [
             company_name,
@@ -1212,7 +1315,8 @@ def extract_info_from_pdf(file_stream):
 
     except Exception as e:
         app.logger.error(f"Error extracting data from PDF: {str(e)}")
-        raise ValueError("Error during PDF extraction")
+        app.logger.debug(f"PDF text for debugging: {pdf_text[:2000]}...")
+        raise ValueError(f"Error during PDF extraction: {str(e)}")
 
 @app.route('/confirm', methods=['GET', 'POST'])
 @login_required
