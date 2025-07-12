@@ -44,7 +44,7 @@ logging.basicConfig(level=logging.DEBUG,
 app.config.update(
     SECRET_KEY='hello',  # Cryptographically secure random key
     PERMANENT_SESSION_LIFETIME=timedelta(minutes=60),
-    SESSION_COOKIE_SECURE=True,  # Ensure HTTPS
+    SESSION_COOKIE_SECURE=False,  # Set to False for local development, True for HTTPS in production
     SESSION_COOKIE_HTTPONLY=True,  # Prevent JavaScript access
     SESSION_COOKIE_SAMESITE='Lax', 
     DB_HOST = 'localhost',
@@ -332,6 +332,7 @@ def load_user(user_id):
     finally:
         if conn:
             release_db(conn)
+
 # Redis connection check (separate from user loader)
 try:
     limiter.storage.storage.ping()
@@ -503,9 +504,6 @@ def non_admin_dashboard():
 @app.route('/delete_receipt/<int:receipt_id>', methods=['POST'])
 @login_required
 def delete_receipt(receipt_id):
-    if 'logged_in' not in session:
-        return redirect(url_for('login'))
-    
     try:
         db = get_db()
         if db is None:
@@ -538,7 +536,7 @@ def round_up(value, decimals=2):
 @app.route('/admin/pending_accounts')
 @login_required
 def pending_accounts():
-    if 'admin' not in session:
+    if not current_user.is_admin:
         return redirect(url_for('login'))
         
     try:
@@ -610,25 +608,31 @@ def generate_random_password(length, include_special_chars=False):
     if include_special_chars:
         characters += string.punctuation
 
-    password = ''.join(random.choice(characters) for
- _ in range(length))
+    password = ''.join(random.choice(characters) for _ in range(length))
     
     return password
 
-# Single login route with rate limiting
+# Single login route with rate limiting - FIXED VERSION
 @app.route('/', methods=['GET', 'POST'])
 @limiter.limit("20 per minute")
 def login():
     if request.method == 'POST':
-        username = request.form.get('username', '')
+        username = request.form.get('username', '').strip()
         password = request.form.get('password', '')
+        
+        if not username or not password:
+            flash("Please enter both username and password", "error")
+            return render_template('login.html')
+        
+        conn = None
         try:
-            db = get_db()
-            if db is None:
+            conn = get_db()
+            if conn is None:
+                app.logger.error("Database connection error in login")
                 flash("Database connection error", "error")
                 return render_template('login.html')
             
-            with db.cursor() as cursor:
+            with conn.cursor() as cursor:
                 cursor.execute("""
                     SELECT id, name, email, phone, username, password, approved, is_admin 
                     FROM users 
@@ -636,40 +640,63 @@ def login():
                 """, (username,))
                 user_data = cursor.fetchone()
                 
-                # Add more detailed logging
-                print(f"Username entered: {username}")
-                print(f"User data found: {user_data}")
+                app.logger.debug(f"Login attempt for username: {username}")
                 
                 if user_data:
-                    is_password_correct = bcrypt.check_password_hash(user_data[5], password)
-                    print(f"Stored hash: {user_data[5]}")
-                    print(f"Password check: {is_password_correct}")
-                    print(f"Approved status: {user_data[6]}")
-                    print(f"Is admin: {user_data[7]}")
+                    user_id, name, email, phone, db_username, hashed_password, approved, is_admin = user_data
                     
-                    if is_password_correct and user_data[6] == 1:  # Approved
-                        user = User(
-                            id=user_data[0],  # user ID
-                            name=user_data[1],  # assuming name is the second column
-                            is_admin=user_data[7] == 1  # convert to boolean
-                        )
-                        login_user(user)
+                    app.logger.debug(f"User found: {name}, approved: {approved}, is_admin: {is_admin}")
+                    
+                    # Check password
+                    if bcrypt.check_password_hash(hashed_password, password):
+                        app.logger.debug("Password verified successfully")
                         
-                        if user.is_admin:
-                            print("Redirecting to admin_home")
-                            return redirect(url_for('admin_home'))
+                        # Check if user is approved
+                        if approved == 1:
+                            app.logger.debug("User is approved, proceeding with login")
+                            
+                            # Create User object for Flask-Login
+                            user = User(
+                                id=user_id,
+                                name=name,
+                                is_admin=is_admin == 1
+                            )
+                            
+                            # Log the user in with Flask-Login
+                            login_user(user, remember=False)
+                            
+                            # Set session data for backward compatibility
+                            session['logged_in'] = True
+                            session['username'] = username
+                            session['user_id'] = user_id
+                            session['admin'] = is_admin == 1
+                            session.permanent = True
+                            
+                            app.logger.info(f"User {username} logged in successfully")
+                            
+                            # Redirect based on admin status
+                            if user.is_admin:
+                                app.logger.debug("Redirecting admin to admin_home")
+                                return redirect(url_for('admin_home'))
+                            else:
+                                app.logger.debug("Redirecting regular user to non_admin_dashboard")
+                                return redirect(url_for('non_admin_dashboard'))
                         else:
-                            print("Redirecting to non_admin_dashboard")
-                            return redirect(url_for('non_admin_dashboard'))
+                            app.logger.warning(f"Login failed for {username}: Account not approved")
+                            flash("Account not approved. Please contact administrator.", "error")
                     else:
-                        print("Login failed: incorrect password or not approved")
-                        flash("Invalid username or password or account not approved", "error")
+                        app.logger.warning(f"Login failed for {username}: Invalid password")
+                        flash("Invalid username or password", "error")
                 else:
-                    print("No user found with this username")
+                    app.logger.warning(f"Login failed: Username {username} not found")
                     flash("Invalid username or password", "error")
+                    
         except Exception as e:
-            print("Unexpected login error:", str(e))
-            flash("An unexpected error occurred", "error")
+            app.logger.error(f"Login error: {str(e)}")
+            flash("An error occurred during login", "error")
+        finally:
+            if conn:
+                return_db(conn)
     
     return render_template('login.html')
   
@@ -743,12 +770,12 @@ def home():
         print(f"Session contents: {dict(session)}")
         
         # Check if the user is an admin
-        if session.get('admin', False):
-            print("Redirecting admin to employee list")
-            return redirect(url_for('employee_list'))
+        if current_user.is_admin:
+            print("Redirecting admin to admin_home")
+            return redirect(url_for('admin_home'))
         else:
-            print("Redirecting non-admin to upload PDF")
-            return redirect(url_for(''))
+            print("Redirecting non-admin to non_admin_dashboard")
+            return redirect(url_for('non_admin_dashboard'))
     
     except Exception as e:
         # Log any unexpected errors
@@ -989,10 +1016,15 @@ def delete_account(user_id):
             db.close()
           
 @app.route('/logout')
+@login_required
 def logout():
-    session.pop('logged_in', None)
-    session.pop('username', None)
-    session.pop('admin', None)
+    # Log out the user from Flask-Login
+    logout_user()
+    
+    # Clear all session data
+    session.clear()
+    
+    flash('You have been logged out successfully.', 'info')
     return redirect(url_for('login'))
 
 def calculate_accessories(pdf_text: str) -> Tuple[float, List[float]]:
@@ -1328,9 +1360,6 @@ def view_receipts():
 @app.route('/receipt_details/<string:rq_invoice>')
 @login_required
 def receipt_details(rq_invoice):
-    if 'logged_in' not in session:
-        return redirect(url_for('login'))
-
     db = get_db()
     cursor = db.cursor()
 
@@ -1338,7 +1367,7 @@ def receipt_details(rq_invoice):
     cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (current_user.id,))
     user = cursor.fetchone()
     is_admin = user and user[2] == 1
-    current_user = user[1] if user else 'User'
+    current_user_name = user[1] if user else 'User'
 
     # Fetch receipt details
     if is_admin:
@@ -1395,7 +1424,7 @@ def receipt_details(rq_invoice):
         except (json.JSONDecodeError, TypeError):
             pass
 
-    return render_template('receipt_details.html', receipt=receipt, imei_iccid_pairs=imei_iccid_pairs, current_user=current_user)
+    return render_template('receipt_details.html', receipt=receipt, imei_iccid_pairs=imei_iccid_pairs, current_user=current_user_name)
 
 @app.route('/commission')
 @login_required
