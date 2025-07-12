@@ -1262,7 +1262,7 @@ def extract_info_from_pdf(file_stream):
 
         # For upgrades, we need to determine if devices are upgrades vs new activations
         # This is tricky from the receipt alone, so we'll assume all are activations for now
-        upgrades_count = 0
+        upgrades_count = 0 
 
         # Check for PPP (Protection Plan)
         ppp_present = bool(re.search(r'Cricket Protection Plan|Protection Plan', pdf_text, re.IGNORECASE))
