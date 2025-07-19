@@ -1565,10 +1565,10 @@ def commission():
         app.logger.error(f"Error in commission route: {str(e)}")
         flash('An error occurred while retrieving commission data', 'error')
         return render_template('error.html'), 500
-
-finally:
-    if conn:
-        release_db(conn)
+    
+    finally:
+        if conn:
+            release_db(conn)
 
 if __name__ == '__main__':
     import sys
