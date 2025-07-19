@@ -1547,11 +1547,24 @@ def commission():
                     WHERE users.id = %s
                     GROUP BY users.username, users.name
                 ''', (current_user.id,))
-
-except Exception as e:
-    app.logger.error(f"Error in commission route: {str(e)}")
-    flash('An error occurred while retrieving commission data', 'error')
-    return render_template('error.html'), 500
+                commission_data = cursor.fetchall()
+                
+                accessories_total = commission_data[0][5] if commission_data else 0
+                progress = min((float(accessories_total) / 1750 * 100), 100)
+                current_tier = commission_data[0][6] if commission_data else 1
+                
+                return render_template('commission.html', 
+                                     commission_data=commission_data, 
+                                     is_admin=False,
+                                     accessories_total=accessories_total,
+                                     current_tier=current_tier,
+                                     progress=progress,
+                                     current_user=current_user.name)
+    
+    except Exception as e:
+        app.logger.error(f"Error in commission route: {str(e)}")
+        flash('An error occurred while retrieving commission data', 'error')
+        return render_template('error.html'), 500
 
 finally:
     if conn:
