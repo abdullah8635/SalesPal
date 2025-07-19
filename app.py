@@ -942,7 +942,7 @@ def calculate_accessories_cricket(pdf_text: str) -> Tuple[float, List[float]]:
             while j < min(i + 15, len(lines)):
                 current_line = lines[j].strip()
                 
-                if not re.match(r'^\d+\s+@\, current_line) and not 'Item Total' in current_line:
+                if not re.match(r'^\d+\s+@\$', current_line) and not 'Item Total' in current_line:
                     item_description += " " + current_line
                 
                 if 'Item Total' in current_line:
