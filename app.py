@@ -28,6 +28,8 @@ from psycopg2.pool import SimpleConnectionPool
 from functools import wraps
 import logging
 from logging.handlers import RotatingFileHandler
+import atexit
+import threading
 
 app = Flask(__name__)
 login_manager = LoginManager(app)
@@ -42,57 +44,100 @@ logging.basicConfig(level=logging.DEBUG,
                     ])
 
 app.config.update(
-    SECRET_KEY='hello',  # Cryptographically secure random key
+    SECRET_KEY='hello',  # Change this to a secure random key in production
     PERMANENT_SESSION_LIFETIME=timedelta(minutes=60),
-    SESSION_COOKIE_SECURE=False,  # Set to False for local development, True for HTTPS in production
-    SESSION_COOKIE_HTTPONLY=True,  # Prevent JavaScript access
+    SESSION_COOKIE_SECURE=False,  # Set to True in production with HTTPS
+    SESSION_COOKIE_HTTPONLY=True,
     SESSION_COOKIE_SAMESITE='Lax', 
-    DB_HOST = 'localhost',
-    DB_NAME = 'salespal',
-    DB_USER = 'yourusername',
-    DB_PASSWORD = 'yourpassword'  # CSRF protection
+    DB_HOST='localhost',
+    DB_NAME='salespal',
+    DB_USER='yourusername',
+    DB_PASSWORD='yourpassword'
 )
 
-# OPTIMIZED DATABASE POOL CONFIGURATION
-db_pool = SimpleConnectionPool(
-    minconn=2,      # Reduced from 1
-    maxconn=20,     # Reduced from 10000 (this was way too high!)
-    host=app.config['DB_HOST'],
-    database=app.config['DB_NAME'],
-    user=app.config['DB_USER'],
-    password=app.config['DB_PASSWORD'],
-    keepalives=1,
-    keepalives_idle=30,
-    keepalives_interval=10,
-    keepalives_count=3,
-    # Add connection timeout settings
-    connect_timeout=10,
-    application_name='salespal_app'
-)
+# SINGLE DATABASE POOL CONFIGURATION
+db_pool = None
+pool_lock = threading.Lock()
 
-bcrypt = Bcrypt(app)
-limiter = Limiter(
-    app=app,
-    key_func=get_remote_address,
-    storage_uri="redis://localhost:6379",
-    default_limits=["200 per day", "1000 per hour"]
-)
+def initialize_db_pool():
+    """Initialize the database connection pool with proper error handling"""
+    global db_pool
+    
+    with pool_lock:
+        if db_pool is not None:
+            return db_pool
+            
+        try:
+            db_pool = SimpleConnectionPool(
+                minconn=5,        # Increased minimum connections
+                maxconn=30,       # Increased maximum connections  
+                host=app.config['DB_HOST'],
+                database=app.config['DB_NAME'],
+                user=app.config['DB_USER'],
+                password=app.config['DB_PASSWORD'],
+                keepalives=1,
+                keepalives_idle=30,
+                keepalives_interval=10,
+                keepalives_count=3,
+                connect_timeout=10,
+                application_name='salespal_app'
+            )
+            app.logger.info(f"Database pool initialized successfully with {db_pool.minconn}-{db_pool.maxconn} connections")
+            return db_pool
+            
+        except Exception as e:
+            app.logger.error(f"Failed to initialize database pool: {str(e)}")
+            raise
 
-# IMPROVED DATABASE CONNECTION MANAGEMENT
+def close_db_pool():
+    """Safely close all database connections"""
+    global db_pool
+    with pool_lock:
+        if db_pool:
+            try:
+                db_pool.closeall()
+                app.logger.info("Database pool closed successfully")
+            except Exception as e:
+                app.logger.error(f"Error closing database pool: {str(e)}")
+            finally:
+                db_pool = None
+
+# Register cleanup function
+atexit.register(close_db_pool)
+
 @contextmanager
 def get_db_connection():
+    """Context manager for database connections with proper error handling"""
     conn = None
     try:
+        if db_pool is None:
+            initialize_db_pool()
+            
         app.logger.debug("Getting database connection from pool")
         conn = db_pool.getconn()
+        
         if conn is None:
             raise Exception("Failed to get connection from pool")
         
-        # Test connection
-        with conn.cursor() as test_cursor:
-            test_cursor.execute("SELECT 1")
+        # Test connection health
+        if conn.closed:
+            app.logger.warning("Retrieved closed connection, getting new one")
+            db_pool.putconn(conn, close=True)
+            conn = db_pool.getconn()
+            
+        # Set autocommit to False for transaction management
+        conn.autocommit = False
         
         yield conn
+        
+    except psycopg2.OperationalError as e:
+        app.logger.error(f"Database operational error: {str(e)}")
+        if conn:
+            try:
+                conn.rollback()
+            except:
+                pass
+        raise
     except Exception as e:
         app.logger.error(f"Database connection error: {str(e)}")
         if conn:
@@ -104,39 +149,42 @@ def get_db_connection():
     finally:
         if conn:
             try:
-                db_pool.putconn(conn)
-                app.logger.debug("Connection returned to pool")
+                if not conn.closed:
+                    db_pool.putconn(conn)
+                    app.logger.debug("Connection returned to pool")
+                else:
+                    app.logger.warning("Connection was closed, marking as bad")
+                    db_pool.putconn(conn, close=True)
             except Exception as e:
                 app.logger.error(f"Error returning connection: {str(e)}")
 
-# Simplified get_db function
-def get_db():
-    try:
-        connection = db_pool.getconn()
-        if connection is None:
-            raise Exception("No connection available")
-        return connection
-    except Exception as e:
-        app.logger.error(f"Failed to get database connection: {str(e)}")
-        return None
-
-def return_db(conn):
-    if conn:
-        try:
-            db_pool.putconn(conn)
-        except Exception as e:
-            app.logger.error(f"Error returning connection to pool: {str(e)}")
-
-# Add database health check
 def check_db_health():
+    """Check database connection health"""
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("SELECT 1")
+                cursor.fetchone()
         return True
     except Exception as e:
         app.logger.error(f"Database health check failed: {str(e)}")
         return False
+
+# Initialize database pool on app startup
+with app.app_context():
+    try:
+        initialize_db_pool()
+    except Exception as e:
+        app.logger.error(f"Failed to initialize database pool on startup: {str(e)}")
+        sys.exit(1)
+
+bcrypt = Bcrypt(app)
+limiter = Limiter(
+    app=app,
+    key_func=get_remote_address,
+    storage_uri="redis://localhost:6379",
+    default_limits=["200 per day", "1000 per hour"]
+)
 
 @app.errorhandler(404)
 def handle_404(e):
@@ -176,7 +224,7 @@ def ratelimit_handler(e):
 
 class User(UserMixin):
     def __init__(self, id, name, is_admin):
-        self.id = str(id)  # Flask-Login needs string ID
+        self.id = str(id)
         self.name = name
         self.is_admin = is_admin
 
@@ -187,10 +235,6 @@ def init_db():
     try:
         app.logger.debug("Starting database initialization")
         with get_db_connection() as conn:
-            if conn is None:
-                app.logger.error("Could not establish database connection")
-                return False
-            
             with conn.cursor() as cursor:
                 app.logger.debug("Setting search path")
                 cursor.execute('SET search_path TO public')
@@ -251,68 +295,7 @@ def init_db():
     except Exception as e:
         app.logger.error(f"Database initialization error: {type(e).__name__}")
         app.logger.error(f"Error details: {str(e)}")
-        if 'conn' in locals():
-            try:
-                conn.rollback()
-                app.logger.debug("Transaction rolled back successfully")
-            except Exception as rollback_error:
-                app.logger.error(f"Rollback failed: {str(rollback_error)}")
         return False
-      
-@app.teardown_appcontext
-def close_connection(exception):
-    db = g.pop('db', None)
-    if db is not None:
-        try:
-            return_db(db)
-            app.logger.debug("Database connection closed")
-        except Exception as e:
-            app.logger.error(f"Error closing database connection: {e}")
-
-CONNECTION_POOL = None
-
-def init_db_pool(app):
-    global CONNECTION_POOL
-    try:
-        CONNECTION_POOL = SimpleConnectionPool(
-            minconn=1,
-            maxconn=20,
-            host=app.config['DB_HOST'],
-            database=app.config['DB_NAME'],
-            user=app.config['DB_USER'],
-            password=app.config['DB_PASSWORD']
-        )
-        app.logger.info("Database connection pool initialized successfully")
-    except Exception as e:
-        app.logger.error(f"Error initializing database connection pool: {e}")
-        raise
-      
-def release_db(conn):
-    global CONNECTION_POOL
-    try:
-        if CONNECTION_POOL and conn:
-            CONNECTION_POOL.putconn(conn)
-    except Exception as e:
-        logging.error(f"Error releasing database connection: {e}")
-      
-def initialize_database():
-    try:
-        with app.app_context():
-            success = init_db()
-            if not success:
-                app.logger.error("Database initialization failed during startup")
-                sys.exit(1)
-            app.logger.info("Database initialized successfully during startup")
-    except Exception as e:
-        app.logger.error(f"Critical error during database initialization: {str(e)}")
-        sys.exit(1)
-
-# Call this function when the app starts
-with app.app_context():
-    if init_db():
-        app.logger.info("Database initialized successfully")
-    else:
-        app.logger.error("Failed to initialize database")
 
 app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16MB max file size
 app.config['UPLOAD_FOLDER'] = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
@@ -326,29 +309,21 @@ app.logger.addHandler(handler)
 
 @login_manager.user_loader
 def load_user(user_id):
-    conn = None
     try:
-        conn = get_db()
-        if conn is None:
-            logging.error("Could not establish database connection for user loading")
-            return None
-        
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (user_id,))
-            user_data = cursor.fetchone()
-            if user_data:
-                return User(
-                    id=user_data[0],
-                    name=user_data[1],
-                    is_admin=user_data[2] == 1
-                )
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (user_id,))
+                user_data = cursor.fetchone()
+                if user_data:
+                    return User(
+                        id=user_data[0],
+                        name=user_data[1],
+                        is_admin=user_data[2] == 1
+                    )
         return None
     except Exception as e:
-        logging.error(f"Error loading user: {e}")
+        app.logger.error(f"Error loading user: {e}")
         return None
-    finally:
-        if conn:
-            release_db(conn)
 
 # Redis connection check
 try:
@@ -372,6 +347,13 @@ def health_check():
     try:
         db_status = check_db_health()
         
+        # Check pool status
+        pool_status = {
+            'total_connections': db_pool.maxconn if db_pool else 0,
+            'available_connections': len(db_pool._pool) if db_pool else 0,
+            'used_connections': (db_pool.maxconn - len(db_pool._pool)) if db_pool else 0
+        }
+        
         redis_status = True
         try:
             limiter.storage.storage.ping()
@@ -382,6 +364,7 @@ def health_check():
             'status': 'healthy' if db_status and redis_status else 'unhealthy',
             'database': 'ok' if db_status else 'error',
             'redis': 'ok' if redis_status else 'error',
+            'pool': pool_status,
             'timestamp': datetime.now().isoformat()
         }
         
@@ -403,9 +386,9 @@ def system_status():
     
     try:
         pool_info = {
-            'pool_size': db_pool.maxconn,
-            'connections_in_use': db_pool.maxconn - len(db_pool._pool),
-            'available_connections': len(db_pool._pool)
+            'pool_size': db_pool.maxconn if db_pool else 0,
+            'connections_in_use': (db_pool.maxconn - len(db_pool._pool)) if db_pool else 0,
+            'available_connections': len(db_pool._pool) if db_pool else 0
         }
         
         with get_db_connection() as conn:
@@ -438,79 +421,77 @@ def update_receipt_details(rq_invoice):
         return jsonify({'error': 'Content-Type must be application/json'}), 400
 
     try:
-        db = get_db()
-        cursor = db.cursor()
-        
-        cursor.execute("""
-            SELECT user_id, imei_iccid_pairs
-            FROM parsed_receipts 
-            WHERE rq_invoice = %s
-        """, (rq_invoice,))
-        
-        receipt = cursor.fetchone()
-        
-        if not receipt:
-            return jsonify({'error': 'Receipt not found'}), 404
-        
-        updates = request.get_json()
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("""
+                    SELECT user_id, imei_iccid_pairs
+                    FROM parsed_receipts 
+                    WHERE rq_invoice = %s
+                """, (rq_invoice,))
+                
+                receipt = cursor.fetchone()
+                
+                if not receipt:
+                    return jsonify({'error': 'Receipt not found'}), 404
+                
+                updates = request.get_json()
 
-        update_columns = []
-        update_values = []
+                update_columns = []
+                update_values = []
 
-        field_mapping = {
-            'store': 'company_name',
-            'customer': 'customer',
-            'order_date': 'order_date',
-            'sales_person': 'sales_person',
-            'total_price': 'total_price',
-            'accessories': 'accessory_prices',
-            'activation_fee': 'activation_fee_sum',
-            'upgrades': 'upgrades_count',
-            'activations': 'activations_count',
-            'ppp_present': 'ppp_present'
-        }
+                field_mapping = {
+                    'store': 'company_name',
+                    'customer': 'customer',
+                    'order_date': 'order_date',
+                    'sales_person': 'sales_person',
+                    'total_price': 'total_price',
+                    'accessories': 'accessory_prices',
+                    'activation_fee': 'activation_fee_sum',
+                    'upgrades': 'upgrades_count',
+                    'activations': 'activations_count',
+                    'ppp_present': 'ppp_present'
+                }
 
-        if 'device_info' in updates:
-            try:
-                for device in updates['device_info']:
-                    if not isinstance(device, dict):
-                        return jsonify({'error': 'Invalid device info format'}), 400
-                    if not all(key in device for key in ['imei', 'iccid']):
-                        return jsonify({'error': 'Missing IMEI or ICCID'}), 400
-                    if not re.match(r'^\d{15}$', str(device['imei'])):
-                        return jsonify({'error': 'IMEI must be exactly 15 digits'}), 400
-                    if not re.match(r'^\d{19,20}$', str(device['iccid'])):
-                        return jsonify({'error': 'ICCID must be 19-20 digits'}), 400
+                if 'device_info' in updates:
+                    try:
+                        for device in updates['device_info']:
+                            if not isinstance(device, dict):
+                                return jsonify({'error': 'Invalid device info format'}), 400
+                            if not all(key in device for key in ['imei', 'iccid']):
+                                return jsonify({'error': 'Missing IMEI or ICCID'}), 400
+                            if not re.match(r'^\d{15}$', str(device['imei'])):
+                                return jsonify({'error': 'IMEI must be exactly 15 digits'}), 400
+                            if not re.match(r'^\d{19,20}$', str(device['iccid'])):
+                                return jsonify({'error': 'ICCID must be 19-20 digits'}), 400
 
-                device_info = json.dumps(updates['device_info'])
-                update_columns.append('imei_iccid_pairs = %s')
-                update_values.append(device_info)
-                del updates['device_info']
-            except (TypeError, ValueError) as e:
-                return jsonify({'error': f'Invalid device info format: {str(e)}'}), 400
+                        device_info = json.dumps(updates['device_info'])
+                        update_columns.append('imei_iccid_pairs = %s')
+                        update_values.append(device_info)
+                        del updates['device_info']
+                    except (TypeError, ValueError) as e:
+                        return jsonify({'error': f'Invalid device info format: {str(e)}'}), 400
 
-        for frontend_field, value in updates.items():
-            if frontend_field in field_mapping:
-                db_column = field_mapping[frontend_field]
-                update_columns.append(f'{db_column} = %s')
-                update_values.append(value)
+                for frontend_field, value in updates.items():
+                    if frontend_field in field_mapping:
+                        db_column = field_mapping[frontend_field]
+                        update_columns.append(f'{db_column} = %s')
+                        update_values.append(value)
 
-        if update_columns:
-            update_query = f"""
-                UPDATE parsed_receipts 
-                SET {', '.join(update_columns)}
-                WHERE rq_invoice = %s
-            """
-            update_values.append(rq_invoice)
+                if update_columns:
+                    update_query = f"""
+                        UPDATE parsed_receipts 
+                        SET {', '.join(update_columns)}
+                        WHERE rq_invoice = %s
+                    """
+                    update_values.append(rq_invoice)
 
-            cursor.execute(update_query, tuple(update_values))
-            db.commit()
+                    cursor.execute(update_query, tuple(update_values))
+                    conn.commit()
 
         return jsonify({'message': 'Receipt updated successfully'})
 
     except Exception as e:
-        db.rollback()
-        print(f"Error updating receipt: {str(e)}")
+        app.logger.error(f"Error updating receipt: {str(e)}")
         return jsonify({'error': str(e)}), 500
 
 @app.route('/non_admin_dashboard')
@@ -519,55 +500,36 @@ def non_admin_dashboard():
     if current_user.is_admin:
         return redirect(url_for('admin_home'))
     
-    conn = None
     try:
-        conn = get_db()
-        if conn is None:
-            app.logger.error("Could not establish database connection")
-            flash('Database connection error', 'error')
-            return render_template('error.html'), 500
-        
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
-            user = cursor.fetchone()
-            
-            if user:
-                return render_template('non_admin_dashboard.html', current_user=user[0])
-            else:
-                return render_template('non_admin_dashboard.html', current_user=current_user.name)
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
+                user = cursor.fetchone()
+                
+                if user:
+                    return render_template('non_admin_dashboard.html', current_user=user[0])
+                else:
+                    return render_template('non_admin_dashboard.html', current_user=current_user.name)
     
     except Exception as e:
         app.logger.error(f"Database error in non_admin_dashboard: {str(e)}")
         flash('An error occurred while loading dashboard', 'error')
         return render_template('error.html'), 500
-    
-    finally:
-        if conn:
-            release_db(conn)
 
 @app.route('/delete_receipt/<int:receipt_id>', methods=['POST'])
 @login_required
 def delete_receipt(receipt_id):
     try:
-        db = get_db()
-        if db is None:
-            app.logger.error("Could not establish database connection")
-            return "Database connection error", 500
-            
-        with db.cursor() as cursor:
-            cursor.execute("DELETE FROM parsed_receipts WHERE id = %s", (receipt_id,))
-            db.commit()
-            
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("DELETE FROM parsed_receipts WHERE id = %s", (receipt_id,))
+                conn.commit()
+                
         return redirect(url_for('view_receipts'))
         
     except Exception as e:
-        if db:
-            db.rollback()
         app.logger.error(f"Error deleting receipt {receipt_id}: {str(e)}")
         return "Error deleting receipt", 500
-    finally:
-        if 'db' in locals():
-            db.close()
 
 def round_up(value, decimals=2):
     factor = 10 ** decimals
@@ -580,23 +542,16 @@ def pending_accounts():
         return redirect(url_for('login'))
         
     try:
-        db = get_db()
-        if db is None:
-            app.logger.error("Could not establish database connection")
-            return "Database connection error", 500
-            
-        with db.cursor() as cursor:
-            cursor.execute("SELECT id, name, email, phone FROM users WHERE approved = 0")
-            pending_users = cursor.fetchall()
-            
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id, name, email, phone FROM users WHERE approved = 0")
+                pending_users = cursor.fetchall()
+                
         return render_template('pending_accounts.html', pending_users=pending_users)
         
     except Exception as e:
         app.logger.error(f"Error fetching pending accounts: {str(e)}")
         return "Error loading pending accounts", 500
-    finally:
-        if 'db' in locals():
-            db.close()
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
@@ -609,32 +564,22 @@ def register():
             password = generate_random_password(10)
             hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
             
-            db = get_db()
-            if db is None:
-                app.logger.error("Could not establish database connection")
-                return "Registration service temporarily unavailable", 500
-                
-            with db.cursor() as cursor:
-                cursor.execute(
-                    "INSERT INTO users (name, email, phone, password, approved) VALUES (%s, %s, %s, %s, 0)",
-                    (name, email, phone, hashed_password)
-                )
-                db.commit()
-                
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "INSERT INTO users (name, email, phone, password, approved) VALUES (%s, %s, %s, %s, 0)",
+                        (name, email, phone, hashed_password)
+                    )
+                    conn.commit()
+                    
             return "Your account has been created. Your password is: {}".format(password), 200
             
         except psycopg2.IntegrityError as e:
-            db.rollback()
             app.logger.warning(f"Registration failed - duplicate entry: {str(e)}")
             return "Email or phone number already exists", 400
         except Exception as e:
-            if 'db' in locals():
-                db.rollback()
             app.logger.error(f"Registration error: {str(e)}")
             return "Error during registration", 500
-        finally:
-            if 'db' in locals():
-                db.close()
     
     return render_template('register.html')
 
@@ -659,80 +604,71 @@ def login():
             flash("Please enter both username and password", "error")
             return render_template('login.html')
         
-        conn = None
         try:
-            conn = get_db()
-            if conn is None:
-                app.logger.error("Database connection error in login")
-                flash("Database connection error", "error")
-                return render_template('login.html')
-            
-            with conn.cursor() as cursor:
-                cursor.execute("""
-                    SELECT id, name, email, phone, username, password, approved, is_admin 
-                    FROM users 
-                    WHERE username = %s
-                """, (username,))
-                user_data = cursor.fetchone()
-                
-                app.logger.debug(f"Login attempt for username: {username}")
-                
-                if user_data:
-                    user_id, name, email, phone, db_username, hashed_password, approved, is_admin = user_data
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("""
+                        SELECT id, name, email, phone, username, password, approved, is_admin 
+                        FROM users 
+                        WHERE username = %s
+                    """, (username,))
+                    user_data = cursor.fetchone()
                     
-                    app.logger.debug(f"User found: {name}, approved: {approved}, is_admin: {is_admin}")
+                    app.logger.debug(f"Login attempt for username: {username}")
                     
-                    if bcrypt.check_password_hash(hashed_password, password):
-                        app.logger.debug("Password verified successfully")
+                    if user_data:
+                        user_id, name, email, phone, db_username, hashed_password, approved, is_admin = user_data
                         
-                        if approved == 1:
-                            app.logger.debug("User is approved, proceeding with login")
+                        app.logger.debug(f"User found: {name}, approved: {approved}, is_admin: {is_admin}")
+                        
+                        if bcrypt.check_password_hash(hashed_password, password):
+                            app.logger.debug("Password verified successfully")
                             
-                            user = User(
-                                id=user_id,
-                                name=name,
-                                is_admin=is_admin == 1
-                            )
-                            
-                            login_user(user, remember=False)
-                            
-                            session['logged_in'] = True
-                            session['username'] = username
-                            session['user_id'] = user_id
-                            session['admin'] = is_admin == 1
-                            session.permanent = True
-                            
-                            app.logger.info(f"User {username} logged in successfully")
-                            
-                            if user.is_admin:
-                                app.logger.debug("Redirecting admin to admin_home")
-                                return redirect(url_for('admin_home'))
+                            if approved == 1:
+                                app.logger.debug("User is approved, proceeding with login")
+                                
+                                user = User(
+                                    id=user_id,
+                                    name=name,
+                                    is_admin=is_admin == 1
+                                )
+                                
+                                login_user(user, remember=False)
+                                
+                                session['logged_in'] = True
+                                session['username'] = username
+                                session['user_id'] = user_id
+                                session['admin'] = is_admin == 1
+                                session.permanent = True
+                                
+                                app.logger.info(f"User {username} logged in successfully")
+                                
+                                if user.is_admin:
+                                    app.logger.debug("Redirecting admin to admin_home")
+                                    return redirect(url_for('admin_home'))
+                                else:
+                                    app.logger.debug("Redirecting regular user to non_admin_dashboard")
+                                    return redirect(url_for('non_admin_dashboard'))
                             else:
-                                app.logger.debug("Redirecting regular user to non_admin_dashboard")
-                                return redirect(url_for('non_admin_dashboard'))
+                                app.logger.warning(f"Login failed for {username}: Account not approved")
+                                flash("Account not approved. Please contact administrator.", "error")
                         else:
-                            app.logger.warning(f"Login failed for {username}: Account not approved")
-                            flash("Account not approved. Please contact administrator.", "error")
+                            app.logger.warning(f"Login failed for {username}: Invalid password")
+                            flash("Invalid username or password", "error")
                     else:
-                        app.logger.warning(f"Login failed for {username}: Invalid password")
+                        app.logger.warning(f"Login failed: Username {username} not found")
                         flash("Invalid username or password", "error")
-                else:
-                    app.logger.warning(f"Login failed: Username {username} not found")
-                    flash("Invalid username or password", "error")
-                    
+                        
         except Exception as e:
             app.logger.error(f"Login error: {str(e)}")
             flash("An error occurred during login", "error")
-        finally:
-            if conn:
-                return_db(conn)
     
     return render_template('login.html')
 
 def reset_user_password(username, new_password):
     try:
-        with get_db_connection() as db:
-            with db.cursor() as cursor:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
                 cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
                 user = cursor.fetchone()
                 
@@ -750,7 +686,7 @@ def reset_user_password(username, new_password):
                 """, (hashed_password, username))
                 
                 updated = cursor.fetchone()
-                db.commit()
+                conn.commit()
                 
                 if updated:
                     app.logger.info(f"Password successfully reset for user: {username}")
@@ -761,8 +697,6 @@ def reset_user_password(username, new_password):
                     
     except Exception as e:
         app.logger.error(f"Password reset error: {str(e)}")
-        if 'db' in locals():
-            db.rollback()
         return False
 
 @app.route('/reset_password', methods=['POST'])
@@ -812,18 +746,12 @@ def admin_home():
         flash('Access denied. Admin privileges required.', 'error')
         return redirect(url_for('login'))
         
-    conn = None
     try:
-        conn = get_db()
-        if conn is None:
-            app.logger.error("Could not establish database connection")
-            flash("Database connection error", "error")
-            return render_template('error.html'), 500
-            
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
-            user = cursor.fetchone()
-            current_username = user[0] if user else 'User'
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
+                user = cursor.fetchone()
+                current_username = user[0] if user else 'User'
             
         return render_template('admin_home.html', current_user=current_username)
         
@@ -831,10 +759,6 @@ def admin_home():
         app.logger.error(f"Error in admin home: {str(e)}")
         flash("An error occurred while loading admin home", "error")
         return render_template('error.html'), 500
-    
-    finally:
-        if conn:
-            release_db(conn)
 
 @app.route('/admin/employees')
 @login_required
@@ -844,19 +768,15 @@ def employee_list():
         return redirect(url_for('login'))
         
     try:
-        db = get_db()
-        if db is None:
-            app.logger.error("Could not establish database connection")
-            return "Database connection error", 500
-            
-        with db.cursor() as cursor:
-            cursor.execute("SELECT id, name, email, phone, username, approved, is_admin, rejected FROM users")
-            employees = cursor.fetchall()
-            
-            cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
-            user = cursor.fetchone()
-            current_username = user[0] if user else 'User'
-            
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id, name, email, phone, username, approved, is_admin, rejected FROM users")
+                employees = cursor.fetchall()
+                
+                cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
+                user = cursor.fetchone()
+                current_username = user[0] if user else 'User'
+                
         return render_template('employee_list.html', 
                              employees=employees, 
                              current_user=current_username)
@@ -864,9 +784,6 @@ def employee_list():
     except Exception as e:
         app.logger.error(f"Error in employee list: {str(e)}")
         return "Error loading employee list", 500
-    finally:
-        if 'db' in locals():
-            db.close()
 
 @app.route('/admin/assign_username/<int:user_id>', methods=['POST'])
 @login_required
@@ -876,36 +793,27 @@ def assign_username(user_id):
         return redirect(url_for('login'))
     
     username = request.form['username']
-    conn = None
     
     try:
-        conn = get_db()
-        if conn is None:
-            flash('Database connection error', 'error')
-            return redirect(url_for('employee_list'))
-        
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
-            existing_user = cursor.fetchone()
-            
-            if existing_user:
-                flash('Username already exists. Please choose another.', 'error')
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+                existing_user = cursor.fetchone()
+                
+                if existing_user:
+                    flash('Username already exists. Please choose another.', 'error')
+                    return redirect(url_for('employee_list'))
+                
+                cursor.execute("UPDATE users SET username = %s WHERE id = %s", (username, user_id))
+                conn.commit()
+                
+                flash('Username assigned successfully.', 'success')
                 return redirect(url_for('employee_list'))
-            
-            cursor.execute("UPDATE users SET username = %s WHERE id = %s", (username, user_id))
-            conn.commit()
-            
-            flash('Username assigned successfully.', 'success')
-            return redirect(url_for('employee_list'))
     
     except Exception as e:
         app.logger.error(f"Error assigning username: {str(e)}")
         flash('An error occurred while assigning username.', 'error')
         return redirect(url_for('employee_list'))
-    
-    finally:
-        if conn:
-            release_db(conn)
           
 @app.route('/admin/approve/<int:user_id>', methods=['POST'])
 @login_required
@@ -915,35 +823,29 @@ def approve_account(user_id):
         return redirect(url_for('login'))
     
     try:
-        db = get_db()
-        cursor = db.cursor()
-        
-        cursor.execute("SELECT approved, rejected FROM users WHERE id = %s", (user_id,))
-        user = cursor.fetchone()
-        
-        if not user:
-            flash('User not found.', 'error')
-            return redirect(url_for('employee_list'))
-        
-        if user[0] == 1:
-            flash('User account is already approved.', 'info')
-            return redirect(url_for('employee_list'))
-        
-        cursor.execute("UPDATE users SET approved = 1, rejected = 0 WHERE id = %s", (user_id,))
-        db.commit()
-        
-        flash('User account approved successfully.', 'success')
-        return redirect(url_for('employee_list'))
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT approved, rejected FROM users WHERE id = %s", (user_id,))
+                user = cursor.fetchone()
+                
+                if not user:
+                    flash('User not found.', 'error')
+                    return redirect(url_for('employee_list'))
+                
+                if user[0] == 1:
+                    flash('User account is already approved.', 'info')
+                    return redirect(url_for('employee_list'))
+                
+                cursor.execute("UPDATE users SET approved = 1, rejected = 0 WHERE id = %s", (user_id,))
+                conn.commit()
+                
+                flash('User account approved successfully.', 'success')
+                return redirect(url_for('employee_list'))
     
     except Exception as e:
         app.logger.error(f"Error approving user account: {str(e)}")
         flash('An error occurred while approving the account.', 'error')
         return redirect(url_for('employee_list'))
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'db' in locals():
-            db.close()
 
 @app.route('/admin/reject/<int:user_id>', methods=['POST'])
 @login_required
@@ -952,33 +854,24 @@ def reject_account(user_id):
         flash('Access denied. Admin privileges required.', 'error')
         return redirect(url_for('login'))
     
-    conn = None
     try:
-        conn = get_db()
-        if conn is None:
-            flash('Database connection error', 'error')
-            return redirect(url_for('employee_list'))
-        
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
-            if not cursor.fetchone():
-                flash('User not found.', 'error')
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
+                if not cursor.fetchone():
+                    flash('User not found.', 'error')
+                    return redirect(url_for('employee_list'))
+                
+                cursor.execute("UPDATE users SET rejected = 1, approved = 0 WHERE id = %s", (user_id,))
+                conn.commit()
+                
+                flash('User account rejected successfully.', 'success')
                 return redirect(url_for('employee_list'))
-            
-            cursor.execute("UPDATE users SET rejected = 1, approved = 0 WHERE id = %s", (user_id,))
-            conn.commit()
-            
-            flash('User account rejected successfully.', 'success')
-            return redirect(url_for('employee_list'))
     
     except Exception as e:
         app.logger.error(f"Error rejecting user account: {str(e)}")
         flash('An error occurred while rejecting the account.', 'error')
         return redirect(url_for('employee_list'))
-    
-    finally:
-        if conn:
-            release_db(conn)
 
 @app.route('/admin/delete/<int:user_id>', methods=['POST'])
 @login_required
@@ -988,35 +881,29 @@ def delete_account(user_id):
         return redirect(url_for('login'))
     
     try:
-        db = get_db()
-        cursor = db.cursor()
-        
-        cursor.execute("SELECT is_admin FROM users WHERE id = %s", (user_id,))
-        user = cursor.fetchone()
-        
-        if not user:
-            flash('User not found.', 'error')
-            return redirect(url_for('employee_list'))
-        
-        if user[0] == 1:
-            flash('Cannot delete another admin account.', 'error')
-            return redirect(url_for('employee_list'))
-        
-        cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
-        db.commit()
-        
-        flash('User account deleted successfully.', 'success')
-        return redirect(url_for('employee_list'))
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT is_admin FROM users WHERE id = %s", (user_id,))
+                user = cursor.fetchone()
+                
+                if not user:
+                    flash('User not found.', 'error')
+                    return redirect(url_for('employee_list'))
+                
+                if user[0] == 1:
+                    flash('Cannot delete another admin account.', 'error')
+                    return redirect(url_for('employee_list'))
+                
+                cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
+                conn.commit()
+                
+                flash('User account deleted successfully.', 'success')
+                return redirect(url_for('employee_list'))
     
     except Exception as e:
         app.logger.error(f"Error deleting user account: {str(e)}")
         flash('An error occurred while deleting the account.', 'error')
         return redirect(url_for('employee_list'))
-    finally:
-        if 'cursor' in locals():
-            cursor.close()
-        if 'db' in locals():
-            db.close()
           
 @app.route('/logout')
 @login_required
@@ -1055,7 +942,7 @@ def calculate_accessories_cricket(pdf_text: str) -> Tuple[float, List[float]]:
             while j < min(i + 15, len(lines)):
                 current_line = lines[j].strip()
                 
-                if not re.match(r'^\d+\s+@\$', current_line) and not 'Item Total' in current_line:
+                if not re.match(r'^\d+\s+@\, current_line) and not 'Item Total' in current_line:
                     item_description += " " + current_line
                 
                 if 'Item Total' in current_line:
@@ -1217,14 +1104,11 @@ def upload_pdf():
     current_user_name = 'User'
     try:
         if request.method == 'GET':
-            db = get_db()
-            if db is None:
-                return render_template('upload.html', current_user=current_user_name, error="Database connection error")
-
-            with db.cursor() as cursor:
-                cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
-                user = cursor.fetchone()
-                current_user_name = user[0] if user else 'User'
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
+                    user = cursor.fetchone()
+                    current_user_name = user[0] if user else 'User'
 
             return render_template('upload.html', current_user=current_user_name)
 
@@ -1324,15 +1208,11 @@ def confirm_receipt():
 
         current_pdf = parsed_data_list[current_index]
 
-        db = get_db()
-        if db is None:
-            app.logger.error("Database connection error")
-            return "Database connection error", 500
-
-        with db.cursor() as cursor:
-            cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
-            user = cursor.fetchone()
-            logged_in_user = user[0] if user else 'User'
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
+                user = cursor.fetchone()
+                logged_in_user = user[0] if user else 'User'
 
         if request.method == 'POST':
             form_data = {
@@ -1353,25 +1233,25 @@ def confirm_receipt():
             imei_iccid_json = json.dumps(imei_iccid_pairs)
 
             try:
-                with db.cursor() as cursor:
-                    cursor.execute('''
-                        INSERT INTO parsed_receipts (
-                            company_name, customer, order_date, sales_person, rq_invoice,
-                            total_price, accessory_prices, upgrades_count, activations_count,
-                            ppp_present, activation_fee_sum, user_id, imei_iccid_pairs
-                        ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                    ''', (
-                        form_data['company_name'], form_data['customer'], form_data['order_date'],
-                        form_data['sales_person'], form_data['rq_invoice'], form_data['total_price'],
-                        form_data['accessories_prices'], form_data['upgrades_count'],
-                        form_data['activations_count'], form_data['ppp_present'],
-                        form_data['activation_fee_sum'], current_user.id, imei_iccid_json
-                    ))
-                db.commit()
-                app.logger.info(f"Inserted data for {form_data['company_name']} by {logged_in_user}")
+                with get_db_connection() as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute('''
+                            INSERT INTO parsed_receipts (
+                                company_name, customer, order_date, sales_person, rq_invoice,
+                                total_price, accessory_prices, upgrades_count, activations_count,
+                                ppp_present, activation_fee_sum, user_id, imei_iccid_pairs
+                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                        ''', (
+                            form_data['company_name'], form_data['customer'], form_data['order_date'],
+                            form_data['sales_person'], form_data['rq_invoice'], form_data['total_price'],
+                            form_data['accessories_prices'], form_data['upgrades_count'],
+                            form_data['activations_count'], form_data['ppp_present'],
+                            form_data['activation_fee_sum'], current_user.id, imei_iccid_json
+                        ))
+                    conn.commit()
+                    app.logger.info(f"Inserted data for {form_data['company_name']} by {logged_in_user}")
             except Exception as e:
                 app.logger.error(f"DB insert error: {str(e)}")
-                db.rollback()
                 return jsonify({'error': 'Database save error'}), 500
 
             session['current_pdf_index'] = current_index + 1
@@ -1401,38 +1281,35 @@ def confirm_receipt():
 @login_required
 def view_receipts():
     try:
-        db = get_db()
-        if db is None:
-            flash("Database connection error", "error")
-            return redirect(url_for('login'))
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (current_user.id,))
+                user = cursor.fetchone()
+                
+                if not user:
+                    flash("User not found", "error")
+                    return redirect(url_for('login'))
 
-        with db.cursor() as cursor:
-            cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (current_user.id,))
-            user = cursor.fetchone()
-            
-            if not user:
-                flash("User not found", "error")
-                return redirect(url_for('login'))
+                user_id, current_user_name, is_admin = user
+                app.logger.info(f"User: {current_user_name}, Admin: {is_admin}")
 
-            user_id, current_user_name, is_admin = user
-            app.logger.info(f"User: {current_user_name}, Admin: {is_admin}")
-
-            if is_admin:
-                cursor.execute("""
-                    SELECT r.*, u.name AS uploader_name
-                    FROM parsed_receipts r
-                    LEFT JOIN users u ON r.user_id = u.id
-                    ORDER BY r.date_submitted DESC
-                """)
-            else:
-                cursor.execute("""
-                    SELECT r.*, u.name AS uploader_name
-                    FROM parsed_receipts r
-                    LEFT JOIN users u ON r.user_id = u.id
-                    WHERE r.user_id = %s
-                """, (user_id,))
-            
-            receipts = cursor.fetchall()
+                if is_admin:
+                    cursor.execute("""
+                        SELECT r.*, u.name AS uploader_name
+                        FROM parsed_receipts r
+                        LEFT JOIN users u ON r.user_id = u.id
+                        ORDER BY r.date_submitted DESC
+                    """)
+                else:
+                    cursor.execute("""
+                        SELECT r.*, u.name AS uploader_name
+                        FROM parsed_receipts r
+                        LEFT JOIN users u ON r.user_id = u.id
+                        WHERE r.user_id = %s
+                        ORDER BY r.date_submitted DESC
+                    """, (user_id,))
+                
+                receipts = cursor.fetchall()
 
         return render_template('view_receipts.html', receipts=receipts, current_user=current_user_name)
 
@@ -1444,136 +1321,148 @@ def view_receipts():
 @app.route('/receipt_details/<string:rq_invoice>')
 @login_required
 def receipt_details(rq_invoice):
-    db = get_db()
-    cursor = db.cursor()
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (current_user.id,))
+                user = cursor.fetchone()
+                is_admin = user and user[2] == 1
+                current_user_name = user[1] if user else 'User'
 
-    cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (current_user.id,))
-    user = cursor.fetchone()
-    is_admin = user and user[2] == 1
-    current_user_name = user[1] if user else 'User'
+                if is_admin:
+                    cursor.execute("""
+                        SELECT 
+                            r.id, r.company_name, r.customer, r.order_date, r.sales_person, r.rq_invoice,
+                            r.total_price, r.accessory_prices, r.upgrades_count, r.activations_count,
+                            r.ppp_present, r.activation_fee_sum, r.imei_iccid_pairs, u.name as uploader_name
+                        FROM parsed_receipts r
+                        LEFT JOIN users u ON r.user_id = u.id
+                        WHERE r.rq_invoice = %s
+                    """, (rq_invoice,))
+                else:
+                    cursor.execute("""
+                        SELECT 
+                            r.id, r.company_name, r.customer, r.order_date, r.sales_person, r.rq_invoice,
+                            r.total_price, r.accessory_prices, r.upgrades_count, r.activations_count,
+                            r.ppp_present, r.activation_fee_sum, r.imei_iccid_pairs, u.name as uploader_name
+                        FROM parsed_receipts r
+                        LEFT JOIN users u ON r.user_id = u.id
+                        WHERE r.rq_invoice = %s AND r.user_id = %s
+                    """, (rq_invoice, current_user.id))
 
-    if is_admin:
-        cursor.execute("""
-            SELECT 
-                r.id, r.company_name, r.customer, r.order_date, r.sales_person, r.rq_invoice,
-                r.total_price, r.accessory_prices, r.upgrades_count, r.activations_count,
-                r.ppp_present, r.activation_fee_sum, r.imei_iccid_pairs, u.name as uploader_name
-            FROM parsed_receipts r
-            LEFT JOIN users u ON r.user_id = u.id
-            WHERE r.rq_invoice = %s
-        """, (rq_invoice,))
-    else:
-        cursor.execute("""
-            SELECT 
-                r.id, r.company_name, r.customer, r.order_date, r.sales_person, r.rq_invoice,
-                r.total_price, r.accessory_prices, r.upgrades_count, r.activations_count,
-                r.ppp_present, r.activation_fee_sum, r.imei_iccid_pairs, u.name as uploader_name
-            FROM parsed_receipts r
-            LEFT JOIN users u ON r.user_id = u.id
-            WHERE r.rq_invoice = %s AND r.user_id = %s
-        """, (rq_invoice, current_user.id))
+                receipt = cursor.fetchone()
+                if not receipt:
+                    return "Receipt not found", 404
+                
+                imei_iccid_pairs = []
+                if receipt and receipt[12]:
+                    try:
+                        imei_iccid_pairs = json.loads(receipt[12])
+                    except (json.JSONDecodeError, TypeError):
+                        pass
 
-    receipt = cursor.fetchone()
-    if not receipt:
-        return "Receipt not found", 404
+        return render_template('receipt_details.html', receipt=receipt, imei_iccid_pairs=imei_iccid_pairs, current_user=current_user_name)
     
-    imei_iccid_pairs = []
-    if receipt and receipt[12]:
-        try:
-            imei_iccid_pairs = json.loads(receipt[12])
-        except (json.JSONDecodeError, TypeError):
-            pass
-
-    return render_template('receipt_details.html', receipt=receipt, imei_iccid_pairs=imei_iccid_pairs, current_user=current_user_name)
+    except Exception as e:
+        app.logger.error(f"Error in receipt_details: {str(e)}")
+        return "Error loading receipt details", 500
 
 @app.route('/commission')
 @login_required
 def commission():
-    conn = None
     try:
-        conn = get_db()
-        if conn is None:
-            flash('Database connection error', 'error')
-            return render_template('error.html'), 500
-        
-        with conn.cursor() as cursor:
-            cursor.execute("SELECT is_admin FROM users WHERE id = %s", (current_user.id,))
-            user = cursor.fetchone()
-            is_admin = user and user[0] == 1
-            
-            if is_admin:
-                cursor.execute('''
-                    SELECT 
-                        users.username, users.name,
-                        SUM(COALESCE(parsed_receipts.activations_count, 0)) as total_activations,
-                        SUM(COALESCE(parsed_receipts.upgrades_count, 0)) as total_upgrades,
-                        SUM(COALESCE(parsed_receipts.activations_count, 0) + COALESCE(parsed_receipts.upgrades_count, 0)) as total_devices,
-                        COALESCE(SUM(parsed_receipts.total_price), 0) as total_accessories,
-                        CASE 
-                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1750 THEN 4
-                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1000 THEN 3
-                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 750 THEN 2
-                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 500 THEN 1
-                            ELSE 1
-                        END as current_tier
-                    FROM users
-                    LEFT JOIN parsed_receipts ON users.id = parsed_receipts.user_id
-                    WHERE users.is_admin = 0
-                    GROUP BY users.username, users.name
-                ''')
-                commission_data = cursor.fetchall()
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT is_admin FROM users WHERE id = %s", (current_user.id,))
+                user = cursor.fetchone()
+                is_admin = user and user[0] == 1
                 
-                return render_template('commission.html', 
-                                     commission_data=commission_data, 
-                                     is_admin=True,
-                                     current_user=current_user.name)
-            else:
-                cursor.execute('''
-                    SELECT 
-                        users.username, users.name,
-                        SUM(COALESCE(parsed_receipts.activations_count, 0)) as total_activations,
-                        SUM(COALESCE(parsed_receipts.upgrades_count, 0)) as total_upgrades,
-                        SUM(COALESCE(parsed_receipts.activations_count, 0) + COALESCE(parsed_receipts.upgrades_count, 0)) as total_devices,
-                        COALESCE(SUM(parsed_receipts.total_price), 0) as total_accessories,
-                        CASE 
-                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1750 THEN 4
-                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1000 THEN 3
-                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 750 THEN 2
-                            WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 500 THEN 1
-                            ELSE 1
-                        END as current_tier
-                    FROM users
-                    LEFT JOIN parsed_receipts ON users.id = parsed_receipts.user_id
-                    WHERE users.id = %s
-                    GROUP BY users.username, users.name
-                ''', (current_user.id,))
-                commission_data = cursor.fetchall()
-                
-                accessories_total = commission_data[0][5] if commission_data else 0
-                progress = min((float(accessories_total) / 1750 * 100), 100)
-                current_tier = commission_data[0][6] if commission_data else 1
-                
-                return render_template('commission.html', 
-                                     commission_data=commission_data, 
-                                     is_admin=False,
-                                     accessories_total=accessories_total,
-                                     current_tier=current_tier,
-                                     progress=progress,
-                                     current_user=current_user.name)
+                if is_admin:
+                    cursor.execute('''
+                        SELECT 
+                            users.username, users.name,
+                            SUM(COALESCE(parsed_receipts.activations_count, 0)) as total_activations,
+                            SUM(COALESCE(parsed_receipts.upgrades_count, 0)) as total_upgrades,
+                            SUM(COALESCE(parsed_receipts.activations_count, 0) + COALESCE(parsed_receipts.upgrades_count, 0)) as total_devices,
+                            COALESCE(SUM(parsed_receipts.total_price), 0) as total_accessories,
+                            CASE 
+                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1750 THEN 4
+                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1000 THEN 3
+                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 750 THEN 2
+                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 500 THEN 1
+                                ELSE 1
+                            END as current_tier
+                        FROM users
+                        LEFT JOIN parsed_receipts ON users.id = parsed_receipts.user_id
+                        WHERE users.is_admin = 0
+                        GROUP BY users.username, users.name
+                    ''')
+                    commission_data = cursor.fetchall()
+                    
+                    return render_template('commission.html', 
+                                         commission_data=commission_data, 
+                                         is_admin=True,
+                                         current_user=current_user.name)
+                else:
+                    cursor.execute('''
+                        SELECT 
+                            users.username, users.name,
+                            SUM(COALESCE(parsed_receipts.activations_count, 0)) as total_activations,
+                            SUM(COALESCE(parsed_receipts.upgrades_count, 0)) as total_upgrades,
+                            SUM(COALESCE(parsed_receipts.activations_count, 0) + COALESCE(parsed_receipts.upgrades_count, 0)) as total_devices,
+                            COALESCE(SUM(parsed_receipts.total_price), 0) as total_accessories,
+                            CASE 
+                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1750 THEN 4
+                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1000 THEN 3
+                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 750 THEN 2
+                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 500 THEN 1
+                                ELSE 1
+                            END as current_tier
+                        FROM users
+                        LEFT JOIN parsed_receipts ON users.id = parsed_receipts.user_id
+                        WHERE users.id = %s
+                        GROUP BY users.username, users.name
+                    ''', (current_user.id,))
+                    commission_data = cursor.fetchall()
+                    
+                    accessories_total = commission_data[0][5] if commission_data else 0
+                    progress = min((float(accessories_total) / 1750 * 100), 100)
+                    current_tier = commission_data[0][6] if commission_data else 1
+                    
+                    return render_template('commission.html', 
+                                         commission_data=commission_data, 
+                                         is_admin=False,
+                                         accessories_total=accessories_total,
+                                         current_tier=current_tier,
+                                         progress=progress,
+                                         current_user=current_user.name)
     
     except Exception as e:
         app.logger.error(f"Error in commission route: {str(e)}")
         flash('An error occurred while retrieving commission data', 'error')
         return render_template('error.html'), 500
-    
-    finally:
-        if conn:
-            release_db(conn)
+
+def initialize_database():
+    try:
+        with app.app_context():
+            success = init_db()
+            if not success:
+                app.logger.error("Database initialization failed during startup")
+                sys.exit(1)
+            app.logger.info("Database initialized successfully during startup")
+    except Exception as e:
+        app.logger.error(f"Critical error during database initialization: {str(e)}")
+        sys.exit(1)
+
+# Call this function when the app starts
+with app.app_context():
+    if init_db():
+        app.logger.info("Database initialized successfully")
+    else:
+        app.logger.error("Failed to initialize database")
 
 if __name__ == '__main__':
     import sys
-    
-    initialize_database()
     
     port = int(os.environ.get('PORT', 5000))
     
