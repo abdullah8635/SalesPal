@@ -1030,55 +1030,83 @@ def logout():
 def calculate_accessories_cricket(pdf_text: str) -> Tuple[float, List[float]]:
     """Calculate accessory prices from Cricket receipt text."""
     
-    # Patterns for accessories (exclude phones, SIM cards, and service plans)
-    accessory_items = []
-    
-    # Look for item patterns with prices
-    # Pattern: Item name/code followed by price information
-    item_patterns = [
-        # Pattern for items like "HOL2087 Quikcell moto g 5G (2024) ADVOCATE..."
-        r'([A-Z]{3}\d+)\s+([^@]+?)\s+1\s+@\$(\d+\.?\d*)\s+\$(\d+\.?\d*)',
-        # Pattern for items with "Item Total"
-        r'([A-Z]{3}\d+).*?Item Total\s+\$(\d+\.?\d*)',
-    ]
-    
-    # Items to exclude (phones, SIM, service plans)
-    excluded_prefixes = ['DMTK', 'STHN', '60UNL', '55UNL', 'UNLCOR', 'UNLMORE', 'DEFBYOD']
-    excluded_keywords = ['Activation Fee', 'Motorola', 'iPhone', 'Samsung', 'SIM', 'Unlimited']
-    
     accessory_prices = []
     
-    # Find all potential accessory items
+    # Items to exclude (phones, SIM, service plans, activation fees)
+    excluded_prefixes = ['DMTK', 'STHN', '60UNL', '55UNL', 'UNLCOR', 'UNLMORE', 'DEFBYOD']
+    excluded_keywords = ['Activation Fee', 'Motorola', 'iPhone', 'Samsung', 'SIM', 'Unlimited', 'Cricket More', 'Cricket Core']
+    
+    # Split text into lines for easier processing
     lines = pdf_text.split('\n')
+    
     i = 0
     while i < len(lines):
         line = lines[i].strip()
         
-        # Look for accessory item codes
-        if re.match(r'^[A-Z]{3}\d+', line):
-            item_code = re.match(r'^([A-Z]{3}\d+)', line).group(1)
+        # Look for accessory item codes (3 letters + 4 digits)
+        if re.match(r'^[A-Z]{3}\d{4}', line):
+            item_code = re.match(r'^([A-Z]{3}\d{4})', line).group(1)
             
-            # Skip if it's an excluded item
+            # Skip if it's an excluded item type
             if any(item_code.startswith(prefix) for prefix in excluded_prefixes):
                 i += 1
                 continue
             
-            # Look for the item total in the following lines
-            j = i
-            while j < min(i + 10, len(lines)):  # Look in next 10 lines
-                if 'Item Total' in lines[j]:
-                    total_match = re.search(r'Item Total\s+\$(\d+\.?\d*)', lines[j])
+            # Look for the item description and total in the following lines
+            j = i + 1
+            item_description = ""
+            item_total = 0.0
+            
+            while j < min(i + 15, len(lines)):  # Look in next 15 lines
+                current_line = lines[j].strip()
+                
+                # Collect description lines
+                if not re.match(r'^\d+\s+@\$', current_line) and not 'Item Total' in current_line:
+                    item_description += " " + current_line
+                
+                # Look for Item Total
+                if 'Item Total' in current_line:
+                    total_match = re.search(r'Item Total\s+\$(\d+\.?\d*)', current_line)
                     if total_match:
-                        price = float(total_match.group(1))
+                        item_total = float(total_match.group(1))
                         
-                        # Additional check to exclude service items
-                        item_description = ' '.join(lines[i:j])
-                        if not any(keyword.lower() in item_description.lower() for keyword in excluded_keywords):
-                            accessory_prices.append(price)
-                            app.logger.debug(f"Found accessory: {item_code} - ${price}")
-                        break
+                        # Additional check to exclude service items based on description
+                        full_description = item_description.lower()
+                        is_excluded = any(keyword.lower() in full_description for keyword in excluded_keywords)
+                        
+                        if not is_excluded and item_total > 0:
+                            accessory_prices.append(item_total)
+                            app.logger.debug(f"Found accessory: {item_code} - ${item_total} - {item_description.strip()}")
+                        else:
+                            app.logger.debug(f"Excluded item: {item_code} - ${item_total} - {item_description.strip()}")
+                    break
                 j += 1
         i += 1
+    
+    # Alternative method: Look for specific accessory patterns in the PDF
+    # This catches items that might not follow the standard format
+    accessory_patterns = [
+        # Pattern for case/holster items
+        r'(HOL\d+|OPE\d+|PRO\d+).*?Item Total\s+\$(\d+\.?\d*)',
+        # Pattern for screen protectors
+        r'(STW\d+|SCR\d+|GLN\d+).*?Item Total\s+\$(\d+\.?\d*)',
+        # Pattern for chargers/cables
+        r'(CHG\d+|CBL\d+|CAR\d+).*?Item Total\s+\$(\d+\.?\d*)',
+        # Generic accessory pattern
+        r'([A-Z]{3}\d{4})(?!.*(?:Motorola|iPhone|Samsung|Unlimited|Cricket|SIM|DEVICE)).*?Item Total\s+\$(\d+\.?\d*)'
+    ]
+    
+    for pattern in accessory_patterns:
+        matches = re.finditer(pattern, pdf_text, re.DOTALL | re.IGNORECASE)
+        for match in matches:
+            if len(match.groups()) >= 2:
+                item_code = match.group(1)
+                price = float(match.group(2))
+                
+                # Avoid duplicates
+                if price not in accessory_prices and price > 0:
+                    accessory_prices.append(price)
+                    app.logger.debug(f"Found accessory (pattern): {item_code} - ${price}")
     
     total_price = round(sum(accessory_prices), 2)
     app.logger.debug(f"Total accessories: ${total_price}, Items: {accessory_prices}")
