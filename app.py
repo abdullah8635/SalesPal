@@ -583,15 +583,40 @@ def register():
     
     return render_template('register.html')
 
-def generate_random_password(length, include_special_chars=False):
-    characters = string.ascii_letters + string.digits
-    if include_special_chars:
-        characters += string.punctuation
-
-    password = ''.join(random.choice(characters) for _ in range(length))
+def generate_random_password(length=10, include_special_chars=True):
+    """
+    Generate a random password with specified length and character types.
+    """
+    import secrets
     
-    return password
-
+    # Use more secure character sets
+    lowercase = string.ascii_lowercase
+    uppercase = string.ascii_uppercase
+    digits = string.digits
+    special_chars = "!@#$%^&*"
+    
+    # Ensure at least one character from each type
+    password = [
+        secrets.choice(lowercase),
+        secrets.choice(uppercase), 
+        secrets.choice(digits)
+    ]
+    
+    if include_special_chars:
+        password.append(secrets.choice(special_chars))
+        all_chars = lowercase + uppercase + digits + special_chars
+    else:
+        all_chars = lowercase + uppercase + digits
+    
+    # Fill the rest of the password length
+    for _ in range(length - len(password)):
+        password.append(secrets.choice(all_chars))
+    
+    # Shuffle the password list to avoid predictable patterns
+    secrets.SystemRandom().shuffle(password)
+    
+    return ''.join(password)
+  
 # FIXED LOGIN ROUTE
 @app.route('/', methods=['GET', 'POST'])
 @limiter.limit("20 per minute")
@@ -666,18 +691,24 @@ def login():
     return render_template('login.html')
 
 def reset_user_password(username, new_password):
+    """
+    Reset a user's password. Returns True on success, False on failure.
+    """
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+                # Check if user exists
+                cursor.execute("SELECT id, name FROM users WHERE username = %s", (username,))
                 user = cursor.fetchone()
                 
                 if not user:
                     app.logger.error(f"Password reset failed: User {username} not found")
                     return False
                 
+                # Hash the new password
                 hashed_password = bcrypt.generate_password_hash(new_password).decode('utf-8')
                 
+                # Update the password
                 cursor.execute("""
                     UPDATE users 
                     SET password = %s
@@ -696,22 +727,39 @@ def reset_user_password(username, new_password):
                     return False
                     
     except Exception as e:
-        app.logger.error(f"Password reset error: {str(e)}")
+        app.logger.error(f"Password reset error for {username}: {str(e)}")
         return False
-
+      
+@app.route('/admin/generate_password')
+@login_required
+def generate_password_api():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    # Generate a secure random password
+    password = generate_random_password(10, include_special_chars=True)
+    return jsonify({'password': password})
+  
 @app.route('/reset_password', methods=['POST'])
 @limiter.limit("3 per hour")
 @login_required
 def reset_password_route():
+    if not current_user.is_admin:
+        return jsonify({'error': 'Access denied. Admin privileges required.'}), 403
+    
     try:
         data = request.get_json()
-        username = data.get('username')
-        new_password = data.get('new_password')
+        username = data.get('username', '').strip()
+        new_password = data.get('new_password', '').strip()
         
         if not username or not new_password:
             return jsonify({'error': 'Missing username or new password'}), 400
+        
+        if len(new_password) < 6:
+            return jsonify({'error': 'Password must be at least 6 characters long'}), 400
             
         if reset_user_password(username, new_password):
+            app.logger.info(f"Admin {current_user.name} reset password for user: {username}")
             return jsonify({'message': 'Password reset successful'}), 200
         else:
             return jsonify({'error': 'Password reset failed'}), 400
@@ -761,7 +809,7 @@ def admin_home():
         return render_template('error.html'), 500
 
 @app.route('/admin/employees')
-@login_required
+@login_required  
 def employee_list():
     if not current_user.is_admin:
         flash('Access denied. Admin privileges required.')
@@ -770,9 +818,21 @@ def employee_list():
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT id, name, email, phone, username, approved, is_admin, rejected FROM users")
+                # Get all employees with their status
+                cursor.execute("""
+                    SELECT id, name, email, phone, username, approved, is_admin, rejected 
+                    FROM users 
+                    ORDER BY 
+                        CASE 
+                            WHEN approved = 0 AND rejected = 0 THEN 1  -- Pending first
+                            WHEN approved = 1 THEN 2                  -- Approved second  
+                            WHEN rejected = 1 THEN 3                  -- Rejected last
+                        END,
+                        name ASC
+                """)
                 employees = cursor.fetchall()
                 
+                # Get current user info
                 cursor.execute("SELECT name FROM users WHERE id = %s", (current_user.id,))
                 user = cursor.fetchone()
                 current_username = user[0] if user else 'User'
@@ -783,95 +843,114 @@ def employee_list():
                              
     except Exception as e:
         app.logger.error(f"Error in employee list: {str(e)}")
-        return "Error loading employee list", 500
+        flash('An error occurred while loading the employee list.', 'error')
+        return redirect(url_for('admin_home'))
 
 @app.route('/admin/assign_username/<int:user_id>', methods=['POST'])
 @login_required
 def assign_username(user_id):
     if not current_user.is_admin:
-        flash('Access denied. Admin privileges required.', 'error')
-        return redirect(url_for('login'))
+        return jsonify({'error': 'Access denied'}), 403
     
-    username = request.form['username']
+    username = request.form.get('username', '').strip()
+    
+    if not username:
+        return jsonify({'error': 'Username cannot be empty'}), 400
+    
+    if len(username) < 3:
+        return jsonify({'error': 'Username must be at least 3 characters long'}), 400
+    
+    # Basic username validation (alphanumeric and underscore only)
+    if not re.match(r'^[a-zA-Z0-9_]+$', username):
+        return jsonify({'error': 'Username can only contain letters, numbers, and underscores'}), 400
     
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT id FROM users WHERE username = %s", (username,))
+                # Check if user exists
+                cursor.execute("SELECT name FROM users WHERE id = %s", (user_id,))
+                user = cursor.fetchone()
+                
+                if not user:
+                    return jsonify({'error': 'User not found'}), 404
+                
+                # Check if username already exists
+                cursor.execute("SELECT id FROM users WHERE username = %s AND id != %s", (username, user_id))
                 existing_user = cursor.fetchone()
                 
                 if existing_user:
-                    flash('Username already exists. Please choose another.', 'error')
-                    return redirect(url_for('employee_list'))
+                    return jsonify({'error': 'Username already exists. Please choose another.'}), 400
                 
+                # Assign the username
                 cursor.execute("UPDATE users SET username = %s WHERE id = %s", (username, user_id))
                 conn.commit()
                 
-                flash('Username assigned successfully.', 'success')
-                return redirect(url_for('employee_list'))
-    
+                app.logger.info(f"Admin {current_user.name} assigned username '{username}' to user: {user[0]} (ID: {user_id})")
+                return jsonify({'message': 'Username assigned successfully'}), 200
+                
+    except psycopg2.IntegrityError as e:
+        app.logger.error(f"Integrity error assigning username: {str(e)}")
+        return jsonify({'error': 'Username already exists'}), 400
     except Exception as e:
         app.logger.error(f"Error assigning username: {str(e)}")
-        flash('An error occurred while assigning username.', 'error')
-        return redirect(url_for('employee_list'))
+        return jsonify({'error': 'Failed to assign username'}), 500
           
 @app.route('/admin/approve/<int:user_id>', methods=['POST'])
 @login_required
 def approve_account(user_id):
     if not current_user.is_admin:
-        flash('Access denied. Admin privileges required.', 'error')
-        return redirect(url_for('login'))
+        return jsonify({'error': 'Access denied'}), 403
     
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT approved, rejected FROM users WHERE id = %s", (user_id,))
+                # Check if user exists
+                cursor.execute("SELECT name, approved, rejected FROM users WHERE id = %s", (user_id,))
                 user = cursor.fetchone()
                 
                 if not user:
-                    flash('User not found.', 'error')
-                    return redirect(url_for('employee_list'))
+                    return jsonify({'error': 'User not found'}), 404
                 
-                if user[0] == 1:
-                    flash('User account is already approved.', 'info')
-                    return redirect(url_for('employee_list'))
+                if user[1] == 1:  # already approved
+                    return jsonify({'message': 'User account is already approved'}), 200
                 
+                # Approve the user
                 cursor.execute("UPDATE users SET approved = 1, rejected = 0 WHERE id = %s", (user_id,))
                 conn.commit()
                 
-                flash('User account approved successfully.', 'success')
-                return redirect(url_for('employee_list'))
-    
+                app.logger.info(f"Admin {current_user.name} approved user: {user[0]} (ID: {user_id})")
+                return jsonify({'message': 'User account approved successfully'}), 200
+                
     except Exception as e:
-        app.logger.error(f"Error approving user account: {str(e)}")
-        flash('An error occurred while approving the account.', 'error')
-        return redirect(url_for('employee_list'))
+        app.logger.error(f"Error approving user {user_id}: {str(e)}")
+        return jsonify({'error': 'Failed to approve user account'}), 500
 
 @app.route('/admin/reject/<int:user_id>', methods=['POST'])
 @login_required
 def reject_account(user_id):
     if not current_user.is_admin:
-        flash('Access denied. Admin privileges required.', 'error')
-        return redirect(url_for('login'))
+        return jsonify({'error': 'Access denied'}), 403
     
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT id FROM users WHERE id = %s", (user_id,))
-                if not cursor.fetchone():
-                    flash('User not found.', 'error')
-                    return redirect(url_for('employee_list'))
+                # Check if user exists
+                cursor.execute("SELECT name, approved, rejected FROM users WHERE id = %s", (user_id,))
+                user = cursor.fetchone()
                 
+                if not user:
+                    return jsonify({'error': 'User not found'}), 404
+                
+                # Reject the user
                 cursor.execute("UPDATE users SET rejected = 1, approved = 0 WHERE id = %s", (user_id,))
                 conn.commit()
                 
-                flash('User account rejected successfully.', 'success')
-                return redirect(url_for('employee_list'))
-    
+                app.logger.info(f"Admin {current_user.name} rejected user: {user[0]} (ID: {user_id})")
+                return jsonify({'message': 'User account rejected successfully'}), 200
+                
     except Exception as e:
-        app.logger.error(f"Error rejecting user account: {str(e)}")
-        flash('An error occurred while rejecting the account.', 'error')
-        return redirect(url_for('employee_list'))
+        app.logger.error(f"Error rejecting user {user_id}: {str(e)}")
+        return jsonify({'error': 'Failed to reject user account'}), 500
 
 @app.route('/admin/delete/<int:user_id>', methods=['POST'])
 @login_required
@@ -883,28 +962,72 @@ def delete_account(user_id):
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT is_admin FROM users WHERE id = %s", (user_id,))
+                # Check if user exists and get user info
+                cursor.execute("SELECT is_admin, name FROM users WHERE id = %s", (user_id,))
                 user = cursor.fetchone()
                 
                 if not user:
                     flash('User not found.', 'error')
                     return redirect(url_for('employee_list'))
                 
+                # Prevent deleting admin accounts
                 if user[0] == 1:
                     flash('Cannot delete another admin account.', 'error')
                     return redirect(url_for('employee_list'))
                 
-                cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
-                conn.commit()
+                # First delete related records (if any) to avoid foreign key constraints
+                cursor.execute("DELETE FROM parsed_receipts WHERE user_id = %s", (user_id,))
                 
-                flash('User account deleted successfully.', 'success')
-                return redirect(url_for('employee_list'))
-    
+                # Then delete the user
+                cursor.execute("DELETE FROM users WHERE id = %s", (user_id,))
+                
+                # Check if deletion was successful
+                if cursor.rowcount == 0:
+                    flash('Failed to delete user account.', 'error')
+                    return redirect(url_for('employee_list'))
+                
+                conn.commit()
+                app.logger.info(f"Admin {current_user.name} deleted user account: {user[1]} (ID: {user_id})")
+                flash(f'User account for {user[1]} deleted successfully.', 'success')
+                
+    except psycopg2.Error as e:
+        app.logger.error(f"Database error deleting user {user_id}: {str(e)}")
+        flash('Database error occurred while deleting the account.', 'error')
     except Exception as e:
-        app.logger.error(f"Error deleting user account: {str(e)}")
-        flash('An error occurred while deleting the account.', 'error')
-        return redirect(url_for('employee_list'))
-          
+        app.logger.error(f"Unexpected error deleting user {user_id}: {str(e)}")
+        flash('An unexpected error occurred while deleting the account.', 'error')
+    
+    return redirect(url_for('employee_list'))
+
+@app.route('/admin/get_password/<int:user_id>')
+@login_required
+def get_user_password(user_id):
+    if not current_user.is_admin:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT username, password FROM users WHERE id = %s", (user_id,))
+                user = cursor.fetchone()
+                
+                if not user:
+                    return jsonify({'error': 'User not found'}), 404
+                
+                # Since passwords are hashed, we'll need to generate a new one
+                # and show it to the admin. This is a security consideration.
+                # Alternative: show that password is encrypted and allow reset only
+                
+                return jsonify({
+                    'success': True,
+                    'password': '[ENCRYPTED - Use Reset to Change]',
+                    'username': user[0]
+                })
+                
+    except Exception as e:
+        app.logger.error(f"Error fetching password for user {user_id}: {str(e)}")
+        return jsonify({'error': 'Failed to fetch password'}), 500
+      
 @app.route('/logout')
 @login_required
 def logout():
