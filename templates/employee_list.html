@@ -66,19 +66,18 @@
             min-height: 100vh;
             display: flex;
             justify-content: center;
-            align-items: center;
+            align-items: flex-start;
             padding: 2rem;
-            padding-top: 100px;
+            padding-top: 120px;
         }
 
         .container {
             background: white;
-            padding: 3.5rem;
+            padding: 2rem;
             border-radius: 12px;
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
             width: 100%;
-            max-width: 1200px;
-            text-align: center;
+            max-width: 1400px;
             transition: box-shadow 0.3s ease;
         }
 
@@ -91,10 +90,19 @@
             font-weight: 600;
             color: rgb(67, 177, 43);
             margin-bottom: 2rem;
+            text-align: center;
+        }
+
+        .actions {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            flex-wrap: wrap;
         }
 
         .actions a {
-            padding: 0.875rem;
+            padding: 0.875rem 1.5rem;
             border: none;
             border-radius: 6px;
             font-size: 1rem;
@@ -125,14 +133,8 @@
         }
 
         .search-container {
-            background: white;
-            padding: 2.5rem;
-            border-radius: 12px;
-            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
-            width: 100%;
-            max-width: 1200px;
+            margin-bottom: 2rem;
             text-align: center;
-            transition: box-shadow 0.3s ease;
         }
 
         .search-box {
@@ -144,8 +146,14 @@
             font-size: 1rem;
         }
 
+        .table-container {
+            overflow-x: auto;
+            margin-bottom: 2rem;
+        }
+
         table {
             width: 100%;
+            min-width: 1000px;
             border-collapse: collapse;
             background: white;
             border-radius: 12px;
@@ -162,22 +170,28 @@
         th {
             background-color: #f2f2f2;
             font-weight: bold;
+            position: sticky;
+            top: 0;
         }
 
         tr:nth-child(even) {
             background-color: #f9f9f9;
         }
 
+        tr:hover {
+            background-color: #f0f8ff;
+        }
+
         .btn {
-            padding: 0.875rem;
+            padding: 0.5rem 1rem;
             border: none;
             border-radius: 6px;
-            font-size: 1rem;
+            font-size: 0.9rem;
             font-weight: bold;
             cursor: pointer;
             color: white;
             transition: all 0.3s ease;
-            margin: 0.25rem;
+            margin: 0.125rem;
         }
 
         .btn.assign {
@@ -196,9 +210,179 @@
             background-color: #6c757d;
         }
 
+        .btn.password {
+            background-color: #fd7e14;
+        }
+
         .btn:hover {
             transform: scale(1.02);
             box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .username-form {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .username-form input {
+            padding: 0.5rem;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            width: 120px;
+        }
+
+        /* Modal Styles */
+        .modal {
+            display: none;
+            position: fixed;
+            z-index: 2000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            overflow: auto;
+            background-color: rgba(0,0,0,0.5);
+        }
+
+        .modal-content {
+            background-color: #fefefe;
+            margin: 15% auto;
+            padding: 2rem;
+            border: none;
+            border-radius: 12px;
+            width: 90%;
+            max-width: 500px;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+        }
+
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .modal-header h2 {
+            color: #43B02A;
+            margin: 0;
+        }
+
+        .close {
+            color: #aaa;
+            font-size: 28px;
+            font-weight: bold;
+            cursor: pointer;
+            line-height: 1;
+        }
+
+        .close:hover,
+        .close:focus {
+            color: #dc3545;
+        }
+
+        .form-group {
+            margin-bottom: 1.5rem;
+        }
+
+        .form-group label {
+            display: block;
+            margin-bottom: 0.5rem;
+            font-weight: bold;
+            color: #333;
+        }
+
+        .form-group input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            font-size: 1rem;
+            transition: border-color 0.3s ease;
+        }
+
+        .form-group input:focus {
+            outline: none;
+            border-color: #43B02A;
+        }
+
+        .password-display {
+            background-color: #f8f9fa;
+            border: 2px solid #e9ecef;
+            padding: 0.75rem;
+            border-radius: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 1.1rem;
+            font-weight: bold;
+            color: #495057;
+            text-align: center;
+            margin-bottom: 1rem;
+        }
+
+        .modal-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 1rem;
+        }
+
+        .modal-btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 6px;
+            font-size: 1rem;
+            font-weight: bold;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+
+        .modal-btn.save {
+            background-color: #28a745;
+            color: white;
+        }
+
+        .modal-btn.cancel {
+            background-color: #6c757d;
+            color: white;
+        }
+
+        .modal-btn.generate {
+            background-color: #17a2b8;
+            color: white;
+        }
+
+        .modal-btn:hover {
+            transform: scale(1.02);
+            box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+        }
+
+        .status-badge {
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            text-transform: uppercase;
+        }
+
+        .status-approved {
+            background-color: #d4edda;
+            color: #155724;
+        }
+
+        .status-pending {
+            background-color: #fff3cd;
+            color: #856404;
+        }
+
+        .status-rejected {
+            background-color: #f8d7da;
+            color: #721c24;
         }
 
         @media (max-width: 768px) {
@@ -212,15 +396,39 @@
 
             .main-content {
                 padding: 1rem;
-                padding-top: 80px;
+                padding-top: 100px;
             }
 
             .container {
-                padding: 2rem;
+                padding: 1.5rem;
             }
 
             h1 {
                 font-size: 1.5rem;
+            }
+
+            .actions {
+                flex-direction: column;
+            }
+
+            .btn {
+                padding: 0.4rem 0.8rem;
+                font-size: 0.8rem;
+            }
+
+            .modal-content {
+                margin: 10% auto;
+                padding: 1.5rem;
+            }
+
+            .username-form {
+                flex-direction: column;
+                align-items: stretch;
+            }
+
+            .username-form input {
+                width: 100%;
+                margin-bottom: 0.5rem;
             }
         }
     </style>
@@ -239,65 +447,107 @@
     <main class="main-content">
         <div class="container">
             <h1>Employee Management</h1>
+            
             <div class="actions">
-                <a href="{{ url_for('non_admin_dashboard') }}">Return to Admin Dashboard</a>
+                <a href="{{ url_for('admin_home') }}">Return to Admin Dashboard</a>
                 <a href="{{ url_for('logout') }}" class="logout">Logout</a>
             </div>
+
             <div class="search-container">
-                <input type="text" id="searchInput" class="search-box" placeholder="Search by username..." onkeyup="filterEmployees()">
+                <input type="text" id="searchInput" class="search-box" placeholder="Search by username, name, or email..." onkeyup="filterEmployees()">
             </div>
-            <table id="employeeTable">
-                <thead>
-                    <tr>
-                        <th>Username</th>
-                        <th>Name</th>
-                        <th>Email</th>
-                        <th>Phone</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for employee in employees %}
-                    <tr>
-                        <td>{{ employee[4] }}</td>
-                        <td>{{ employee[1] }}</td>
-                        <td>{{ employee[2] }}</td>
-                        <td>{{ employee[3] }}</td> 
-                        <td>
-                            {% if employee[5] == 1 %}
-                                Approved
-                            {% elif employee[7] == 1 %}
-                                Rejected
-                            {% else %}
-                                Pending
-                            {% endif %}
-                        </td>
-                        <td>
-                            {% if employee[4] is none %}
-                                <form method="POST" action="{{ url_for('assign_username', user_id=employee[0]) }}">
-                                    <input type="text" name="username" placeholder="Assign Username">
-                                    <button type="submit" class="btn assign">Assign</button>
-                                </form>
-                            {% endif %}
-                            <form method="POST" action="{{ url_for('approve_account', user_id=employee[0]) }}">
-                                <button type="submit" class="btn approve">Approve</button>
-                            </form>
-                            <form method="POST" action="{{ url_for('reject_account', user_id=employee[0]) }}">
-                                <button type="submit" class="btn reject">Reject</button>
-                            </form>
-                            <form method="POST" action="{{ url_for('delete_account', user_id=employee[0]) }}" onsubmit="return confirm('Are you sure you want to delete the account for {{ employee[2] }}?');">
-                                <button type="submit" class="btn delete">Delete</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+
+            <div class="table-container">
+                <table id="employeeTable">
+                    <thead>
+                        <tr>
+                            <th>Username</th>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Phone</th>
+                            <th>Status</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for employee in employees %}
+                        <tr>
+                            <td>{{ employee[4] or 'Not Assigned' }}</td>
+                            <td>{{ employee[1] }}</td>
+                            <td>{{ employee[2] }}</td>
+                            <td>{{ employee[3] }}</td>
+                            <td>
+                                {% if employee[5] == 1 %}
+                                    <span class="status-badge status-approved">Approved</span>
+                                {% elif employee[7] == 1 %}
+                                    <span class="status-badge status-rejected">Rejected</span>
+                                {% else %}
+                                    <span class="status-badge status-pending">Pending</span>
+                                {% endif %}
+                            </td>
+                            <td>
+                                {% if employee[4] is none %}
+                                    <div class="username-form">
+                                        <input type="text" placeholder="Username" id="username-{{ employee[0] }}">
+                                        <button class="btn assign" onclick="assignUsername({{ employee[0] }})">Assign</button>
+                                    </div>
+                                {% else %}
+                                    <button class="btn password" onclick="openPasswordModal('{{ employee[4] }}', '{{ employee[1] }}', {{ employee[0] }})">Password</button>
+                                {% endif %}
+                                
+                                <button class="btn approve" onclick="approveUser({{ employee[0] }})" 
+                                        {% if employee[5] == 1 %}disabled title="Already approved"{% endif %}>
+                                    Approve
+                                </button>
+                                
+                                <button class="btn reject" onclick="rejectUser({{ employee[0] }})"
+                                        {% if employee[7] == 1 %}disabled title="Already rejected"{% endif %}>
+                                    Reject
+                                </button>
+                                
+                                {% if employee[6] != 1 %}
+                                <button class="btn delete" onclick="deleteUser({{ employee[0] }}, '{{ employee[1] }}')">Delete</button>
+                                {% endif %}
+                            </td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
         </div>
     </main>
 
+    <!-- Password Management Modal -->
+    <div id="passwordModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>Manage Password</h2>
+                <span class="close" onclick="closePasswordModal()">&times;</span>
+            </div>
+            <div class="form-group">
+                <label>Employee:</label>
+                <div id="employeeInfo" style="font-weight: bold; color: #43B02A;"></div>
+            </div>
+            <div class="form-group">
+                <label>Current Password:</label>
+                <div id="currentPassword" class="password-display">Loading...</div>
+            </div>
+            <div class="form-group">
+                <label for="newPassword">New Password:</label>
+                <input type="text" id="newPassword" placeholder="Enter new password">
+            </div>
+            <div class="modal-actions">
+                <button class="modal-btn generate" onclick="generatePassword()">Generate</button>
+                <button class="modal-btn save" onclick="savePassword()">Update Password</button>
+                <button class="modal-btn cancel" onclick="closePasswordModal()">Cancel</button>
+            </div>
+        </div>
+    </div>
+
     <script>
+        let currentUserId = null;
+        let currentUsername = null;
+
         function filterEmployees() {
             const input = document.getElementById('searchInput');
             const filter = input.value.toLowerCase();
@@ -305,13 +555,232 @@
             const tr = table.getElementsByTagName('tr');
             
             for (let i = 1; i < tr.length; i++) {
-                const td = tr[i].getElementsByTagName('td')[0];
-                if (td) {
-                    const txtValue = td.textContent || td.innerText;
-                    tr[i].style.display = txtValue.toLowerCase().indexOf(filter) > -1 ? '' : 'none';
-                }       
+                const tds = tr[i].getElementsByTagName('td');
+                let shouldShow = false;
+                
+                // Search in username, name, and email columns
+                for (let j = 0; j < 3; j++) {
+                    if (tds[j]) {
+                        const txtValue = tds[j].textContent || tds[j].innerText;
+                        if (txtValue.toLowerCase().indexOf(filter) > -1) {
+                            shouldShow = true;
+                            break;
+                        }
+                    }
+                }
+                
+                tr[i].style.display = shouldShow ? '' : 'none';
             }
         }
+
+        function assignUsername(userId) {
+            const usernameInput = document.getElementById(`username-${userId}`);
+            const username = usernameInput.value.trim();
+            
+            if (!username) {
+                alert('Please enter a username');
+                return;
+            }
+
+            if (username.length < 3) {
+                alert('Username must be at least 3 characters long');
+                return;
+            }
+
+            fetch(`/admin/assign_username/${userId}`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `username=${encodeURIComponent(username)}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message) {
+                    alert(data.message);
+                    location.reload();
+                } else {
+                    throw new Error(data.error || 'Failed to assign username');
+                }
+            })
+            .catch(error => {
+                alert('Error: ' + error.message);
+            });
+        }
+
+        function approveUser(userId) {
+            if (confirm('Are you sure you want to approve this user?')) {
+                fetch(`/admin/approve/${userId}`, {
+                    method: 'POST',
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.message) {
+                        alert(data.message);
+                        location.reload();
+                    } else {
+                        throw new Error(data.error || 'Failed to approve user');
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error.message);
+                });
+            }
+        }
+
+        function rejectUser(userId) {
+            if (confirm('Are you sure you want to reject this user?')) {
+                fetch(`/admin/reject/${userId}`, {
+                    method: 'POST',
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.message) {
+                        alert(data.message);
+                        location.reload();
+                    } else {
+                        throw new Error(data.error || 'Failed to reject user');
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error.message);
+                });
+            }
+        }
+
+        function deleteUser(userId, userName) {
+            if (confirm(`Are you sure you want to delete the account for ${userName}? This action cannot be undone.`)) {
+                fetch(`/admin/delete/${userId}`, {
+                    method: 'POST',
+                })
+                .then(response => response.json())
+                .then(data => {
+                    if (data.message) {
+                        alert(data.message);
+                        location.reload();
+                    } else {
+                        throw new Error(data.error || 'Failed to delete user');
+                    }
+                })
+                .catch(error => {
+                    alert('Error: ' + error.message);
+                });
+            }
+        }
+
+        function openPasswordModal(username, fullName, userId) {
+            currentUserId = userId;
+            currentUsername = username;
+            
+            document.getElementById('employeeInfo').textContent = `${fullName} (${username})`;
+            document.getElementById('passwordModal').style.display = 'block';
+            document.getElementById('newPassword').value = '';
+            
+            // Fetch current password status
+            fetchCurrentPassword(userId);
+        }
+
+        function closePasswordModal() {
+            document.getElementById('passwordModal').style.display = 'none';
+            currentUserId = null;
+            currentUsername = null;
+        }
+
+        function fetchCurrentPassword(userId) {
+            document.getElementById('currentPassword').textContent = 'Loading...';
+            
+            fetch(`/admin/get_password/${userId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        document.getElementById('currentPassword').textContent = data.password;
+                    } else {
+                        document.getElementById('currentPassword').textContent = 'Error loading password';
+                    }
+                })
+                .catch(error => {
+                    document.getElementById('currentPassword').textContent = 'Error loading password';
+                    console.error('Error:', error);
+                });
+        }
+
+        function generatePassword() {
+            fetch('/admin/generate_password')
+                .then(response => response.json())
+                .then(data => {
+                    if (data.password) {
+                        document.getElementById('newPassword').value = data.password;
+                    } else {
+                        throw new Error('Failed to generate password');
+                    }
+                })
+                .catch(error => {
+                    alert('Error generating password: ' + error.message);
+                });
+        }
+
+        function savePassword() {
+            const newPassword = document.getElementById('newPassword').value.trim();
+            
+            if (!newPassword) {
+                alert('Please enter a new password');
+                return;
+            }
+
+            if (newPassword.length < 6) {
+                alert('Password must be at least 6 characters long');
+                return;
+            }
+
+            fetch('/reset_password', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    username: currentUsername,
+                    new_password: newPassword
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.message) {
+                    alert('Password updated successfully!');
+                    closePasswordModal();
+                } else {
+                    throw new Error(data.error || 'Failed to update password');
+                }
+            })
+            .catch(error => {
+                alert('Error: ' + error.message);
+            });
+        }
+
+        // Close modal when clicking outside of it
+        window.onclick = function(event) {
+            const modal = document.getElementById('passwordModal');
+            if (event.target == modal) {
+                closePasswordModal();
+            }
+        }
+
+        // Close modal with Escape key
+        document.addEventListener('keydown', function(event) {
+            if (event.key === 'Escape') {
+                closePasswordModal();
+            }
+        });
+
+        // Show flash messages if any
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for category, message in messages %}
+                    setTimeout(() => {
+                        alert('{{ category.title() }}: {{ message }}');
+                    }, 100);
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
     </script>
 </body>
 </html>
