@@ -956,8 +956,7 @@ def reject_account(user_id):
 @login_required
 def delete_account(user_id):
     if not current_user.is_admin:
-        flash('Access denied. Admin privileges required.', 'error')
-        return redirect(url_for('login'))
+        return jsonify({'error': 'Access denied'}), 403
     
     try:
         with get_db_connection() as conn:
@@ -967,13 +966,11 @@ def delete_account(user_id):
                 user = cursor.fetchone()
                 
                 if not user:
-                    flash('User not found.', 'error')
-                    return redirect(url_for('employee_list'))
+                    return jsonify({'error': 'User not found'}), 404
                 
                 # Prevent deleting admin accounts
                 if user[0] == 1:
-                    flash('Cannot delete another admin account.', 'error')
-                    return redirect(url_for('employee_list'))
+                    return jsonify({'error': 'Cannot delete another admin account'}), 400
                 
                 # First delete related records (if any) to avoid foreign key constraints
                 cursor.execute("DELETE FROM parsed_receipts WHERE user_id = %s", (user_id,))
@@ -983,21 +980,18 @@ def delete_account(user_id):
                 
                 # Check if deletion was successful
                 if cursor.rowcount == 0:
-                    flash('Failed to delete user account.', 'error')
-                    return redirect(url_for('employee_list'))
+                    return jsonify({'error': 'Failed to delete user account'}), 500
                 
                 conn.commit()
                 app.logger.info(f"Admin {current_user.name} deleted user account: {user[1]} (ID: {user_id})")
-                flash(f'User account for {user[1]} deleted successfully.', 'success')
+                return jsonify({'message': f'User account for {user[1]} deleted successfully'}), 200
                 
     except psycopg2.Error as e:
         app.logger.error(f"Database error deleting user {user_id}: {str(e)}")
-        flash('Database error occurred while deleting the account.', 'error')
+        return jsonify({'error': 'Database error occurred while deleting the account'}), 500
     except Exception as e:
         app.logger.error(f"Unexpected error deleting user {user_id}: {str(e)}")
-        flash('An unexpected error occurred while deleting the account.', 'error')
-    
-    return redirect(url_for('employee_list'))
+        return jsonify({'error': 'An unexpected error occurred while deleting the account'}), 500
 
 @app.route('/admin/get_password/<int:user_id>')
 @login_required
