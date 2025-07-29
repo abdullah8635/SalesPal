@@ -598,7 +598,8 @@
             .then(data => {
                 if (data.message) {
                     alert(data.message);
-                    location.reload();
+                    // Update the row to show the assigned username and add password button
+                    updateUsernameAssignment(userId, username);
                 } else {
                     throw new Error(data.error || 'Failed to assign username');
                 }
@@ -606,6 +607,42 @@
             .catch(error => {
                 alert('Error: ' + error.message);
             });
+        }
+
+        function updateUsernameAssignment(userId, username) {
+            // Find the table row for this user
+            const table = document.getElementById('employeeTable');
+            const rows = table.getElementsByTagName('tr');
+            
+            for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                const buttons = row.getElementsByTagName('button');
+                
+                // Check if this is the right row by looking for the assign button
+                for (let button of buttons) {
+                    if (button.onclick && button.onclick.toString().includes(`assignUsername(${userId})`)) {
+                        // Found the right row
+                        const cells = row.getElementsByTagName('td');
+                        
+                        // Update the username cell (first column)
+                        cells[0].textContent = username;
+                        
+                        // Update the actions cell (last column)
+                        const actionsCell = cells[5];
+                        
+                        // Get the user's name for the password modal
+                        const userName = cells[1].textContent;
+                        
+                        // Replace the username form with a password button
+                        actionsCell.innerHTML = actionsCell.innerHTML.replace(
+                            /<div class="username-form">.*?<\/div>/s,
+                            `<button class="btn password" onclick="openPasswordModal('${username}', '${userName}', ${userId})">Password</button>`
+                        );
+                        
+                        return;
+                    }
+                }
+            }
         }
 
         function approveUser(userId) {
@@ -617,7 +654,8 @@
                 .then(data => {
                     if (data.message) {
                         alert(data.message);
-                        location.reload();
+                        // Update the status badge instead of full reload
+                        updateUserStatus(userId, 'approved');
                     } else {
                         throw new Error(data.error || 'Failed to approve user');
                     }
@@ -637,7 +675,8 @@
                 .then(data => {
                     if (data.message) {
                         alert(data.message);
-                        location.reload();
+                        // Update the status badge instead of full reload
+                        updateUserStatus(userId, 'rejected');
                     } else {
                         throw new Error(data.error || 'Failed to reject user');
                     }
@@ -657,7 +696,8 @@
                 .then(data => {
                     if (data.message) {
                         alert(data.message);
-                        location.reload();
+                        // Remove the row from the table instead of full reload
+                        removeUserRow(userId);
                     } else {
                         throw new Error(data.error || 'Failed to delete user');
                     }
@@ -665,6 +705,89 @@
                 .catch(error => {
                     alert('Error: ' + error.message);
                 });
+            }
+        }
+
+        function updateUserStatus(userId, status) {
+            // Find the table row for this user
+            const table = document.getElementById('employeeTable');
+            const rows = table.getElementsByTagName('tr');
+            
+            for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                const cells = row.getElementsByTagName('td');
+                
+                // Check if this is the right row by looking for buttons with the userId
+                const buttons = row.getElementsByTagName('button');
+                for (let button of buttons) {
+                    if (button.onclick && button.onclick.toString().includes(`${userId}`)) {
+                        // Found the right row, update the status
+                        const statusCell = cells[4]; // Status is the 5th column (index 4)
+                        const statusBadge = statusCell.querySelector('.status-badge');
+                        
+                        if (status === 'approved') {
+                            statusBadge.textContent = 'APPROVED';
+                            statusBadge.className = 'status-badge status-approved';
+                            
+                            // Disable the approve button
+                            const approveBtn = row.querySelector('.btn.approve');
+                            if (approveBtn) {
+                                approveBtn.disabled = true;
+                                approveBtn.title = 'Already approved';
+                            }
+                            
+                            // Enable the reject button if it was disabled
+                            const rejectBtn = row.querySelector('.btn.reject');
+                            if (rejectBtn) {
+                                rejectBtn.disabled = false;
+                                rejectBtn.title = '';
+                            }
+                        } else if (status === 'rejected') {
+                            statusBadge.textContent = 'REJECTED';
+                            statusBadge.className = 'status-badge status-rejected';
+                            
+                            // Disable the reject button
+                            const rejectBtn = row.querySelector('.btn.reject');
+                            if (rejectBtn) {
+                                rejectBtn.disabled = true;
+                                rejectBtn.title = 'Already rejected';
+                            }
+                            
+                            // Enable the approve button if it was disabled
+                            const approveBtn = row.querySelector('.btn.approve');
+                            if (approveBtn) {
+                                approveBtn.disabled = false;
+                                approveBtn.title = '';
+                            }
+                        }
+                        return;
+                    }
+                }
+            }
+        }
+
+        function removeUserRow(userId) {
+            // Find and remove the table row for this user
+            const table = document.getElementById('employeeTable');
+            const rows = table.getElementsByTagName('tr');
+            
+            for (let i = 1; i < rows.length; i++) {
+                const row = rows[i];
+                const buttons = row.getElementsByTagName('button');
+                
+                // Check if this is the right row by looking for buttons with the userId
+                for (let button of buttons) {
+                    if (button.onclick && button.onclick.toString().includes(`${userId}`)) {
+                        // Found the right row, remove it
+                        row.style.opacity = '0.5';
+                        row.style.transition = 'opacity 0.3s ease';
+                        
+                        setTimeout(() => {
+                            row.remove();
+                        }, 300);
+                        return;
+                    }
+                }
             }
         }
 
