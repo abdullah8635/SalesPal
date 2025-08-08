@@ -69,8 +69,8 @@ def initialize_db_pool():
             
         try:
             db_pool = SimpleConnectionPool(
-                minconn=5,        # Increased minimum connections
-                maxconn=30,       # Increased maximum connections  
+                minconn=1,        # Increased minimum connections
+                maxconn=5,       # Increased maximum connections  
                 host=app.config['DB_HOST'],
                 database=app.config['DB_NAME'],
                 user=app.config['DB_USER'],
