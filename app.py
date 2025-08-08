@@ -1245,6 +1245,8 @@ def extract_info_from_pdf(file_stream):
         activations_count = 0
         ppp_present = False
         activation_fee_sum = 0.0
+        upgrades_count = 0
+        upgrade_fee_sum = 0.0
         pairs = []
 
         store_match = re.search(r'(\d+):\s*([A-Za-z\s]+)', pdf_text)
@@ -1285,7 +1287,16 @@ def extract_info_from_pdf(file_stream):
         activations_count = len(activation_fees)
         
         activation_fee_sum = sum(float(fee) for fee in activation_fees if fee)
-        
+
+        upgrade_fees = re.findall(r'Upgrade Fee\s*(\d+)?\s*@\$(\d+\.?\d*)', pdf_text, re.IGNORECASE)
+        for qty_str, price_str in upgrade_fees:
+            qty = int(qty_str) if qty_str else 1
+            price = float(price_str)
+            upgrades_count += qty
+            upgrade_fee_sum += qty * price
+
+        app.logger.debug(f"Found {upgrades_count} upgrades, total fees: ${upgrade_fee_sum}")
+      
         app.logger.debug(f"Found {activations_count} activations, total fees: ${activation_fee_sum}")
 
         upgrades_count = 0
