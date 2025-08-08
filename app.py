@@ -1131,11 +1131,14 @@ def calculate_accessories_cricket(pdf_text: str) -> Tuple[float, List[float]]:
                 discount_match = re.search(r'^-\$(\d+\.?\d*)', current_line)
                 if discount_match:
                     discount = float(discount_match.group(1))
-                
+
+                app.logger.debug(f"[DEBUG] Checking for item total in line: {current_line}")
+
                 # Capture Item Total
                 if 'Item Total' in current_line:
-                    total_match = re.search(r'Item Total\s+\$(\d+\.?\d*)', current_line)
+                    total_match = re.search(r'Item Total\s*\$?(\d+\.?\d*)', current_line)
                     if total_match:
+                        app.logger.debug(f"[DEBUG] Checking for item total in line: {current_line}")
                         item_total = float(total_match.group(1))
                         found_item_total = True
                         
