@@ -1079,13 +1079,13 @@ def calculate_accessories_cricket(pdf_text: str) -> Tuple[float, List[float]]:
         line = lines[i].strip()
         
         # Look for item codes (pattern like ABC1234 or longer codes)
-        item_match = re.match(r'^([A-Z]{2,}[A-Z0-9]{4,})', line)
+        item_match = re.match(r'^([A-Z]{2,}[A-Z0-9]*)(?:\s*\d{2,})?', line)
         
         if item_match:
-            item_code = item_match.group(1)
+            item_code = item_match.group(1).upper()
             
             # Quick exclusion check
-            if any(item_code.startswith(prefix) for prefix in excluded_prefixes):
+            if item_code and any(item_code.strip().upper().startswith(prefix) for prefix in excluded_prefixes):
                 i += 1
                 continue
             
