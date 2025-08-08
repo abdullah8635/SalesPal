@@ -1122,7 +1122,7 @@ def calculate_accessories_cricket(pdf_text: str) -> Tuple[float, List[float]]:
                     original_price = float(price_match.group(2))
                 
                 # Capture discount (could be negative value or in Discounts section)
-                if 'Discount' in lines[j-1] if j > 0 else False:
+                if 'Discount' in current_line:
                     discount_match = re.search(r'-?\$(\d+\.?\d*)', current_line)
                     if discount_match:
                         discount = float(discount_match.group(1))
