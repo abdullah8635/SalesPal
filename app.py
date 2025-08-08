@@ -1032,12 +1032,45 @@ def logout():
 
 # IMPROVED CRICKET PDF PARSING FUNCTIONS
 def calculate_accessories_cricket(pdf_text: str) -> Tuple[float, List[float]]:
-    """Calculate accessory prices from Cricket receipt text."""
+    """Calculate accessory prices from Cricket receipt text - commissionable amounts only (after discount, before tax)."""
     
     accessory_prices = []
     
-    excluded_prefixes = ['DMTK', 'STHN', '60UNL', '55UNL', 'UNLCOR', 'UNLMORE', 'DEFBYOD']
-    excluded_keywords = ['Activation Fee', 'Motorola', 'iPhone', 'Samsung', 'SIM', 'Unlimited', 'Cricket More', 'Cricket Core']
+    # Expanded list of excluded prefixes for non-accessory items
+    excluded_prefixes = [
+        'DMTK', 'STHN', 'SGMN', 'SSGN',  # SIM cards
+        '60UNL', '55UNL', 'UNLCOR', 'UNLMORE',  # Service plans
+        'DEFBYOD', 'BYOD',  # BYOD related
+        'DAPN', 'DSMK', 'DMTK', 'DSAM',  # Device prefixes (phones)
+        'IQCRC'  # eSIM
+    ]
+    
+    # Expanded list of keywords that indicate non-accessory items
+    excluded_keywords = [
+        'Activation Fee', 'Upgrade Fee', 'Lease', 'Initial Payment',
+        'Motorola', 'iPhone', 'Samsung', 'Galaxy', 'Nokia', 'TCL',
+        'SIM', 'eSIM', 'DEVICE SIM', 'BYOD SIM',
+        'Unlimited', 'Cricket More', 'Cricket Core', 
+        'Cricket Protect', 'Protection Plan',
+        'E911', 'Service Fee'
+    ]
+    
+    # Known accessory prefixes (positive indicators)
+    accessory_prefixes = [
+        'STW', 'HOL', 'OPE', 'PRO', 'CHG', 'CBL', 'CAR', 
+        'SCR', 'GLN', 'CAB', 'CAC', 'CAD', 'CAT',
+        'CABTAB', 'CACAOB', 'CADKQB', 'CATCQB'
+    ]
+    
+    # Accessory keywords (positive indicators)
+    accessory_keywords = [
+        'Case', 'Cover', 'Tempered Glass', 'Screen Protector',
+        'Charger', 'Cable', 'Adapter', 'Mount', 'Holder',
+        'Airpods', 'Earbuds', 'Headphones', 'Speaker',
+        'Power Bank', 'Battery', 'Otter', 'COMMUTER', 'OPERATOR',
+        'Quikcell', 'CHARGE & SYNC', 'Wall Charger', 'Car Charger',
+        'USB-C', 'Lightning', 'Multi-Port'
+    ]
     
     lines = pdf_text.split('\n')
     
@@ -1045,62 +1078,152 @@ def calculate_accessories_cricket(pdf_text: str) -> Tuple[float, List[float]]:
     while i < len(lines):
         line = lines[i].strip()
         
-        if re.match(r'^[A-Z]{3}\d{4}', line):
-            item_code = re.match(r'^([A-Z]{3}\d{4})', line).group(1)
+        # Look for item codes (pattern like ABC1234 or longer codes)
+        item_match = re.match(r'^([A-Z]{2,}[A-Z0-9]{4,})', line)
+        
+        if item_match:
+            item_code = item_match.group(1)
             
+            # Quick exclusion check
             if any(item_code.startswith(prefix) for prefix in excluded_prefixes):
                 i += 1
                 continue
             
+            # Gather information about this item
             j = i + 1
             item_description = ""
+            original_price = 0.0
+            discount = 0.0
             item_total = 0.0
+            has_imei = False
+            has_iccid = False
+            found_item_total = False
             
-            while j < min(i + 15, len(lines)):
+            # Look ahead to gather all item information
+            while j < min(i + 20, len(lines)):  # Extended range to catch all details
                 current_line = lines[j].strip()
                 
-                if not re.match(r'^\d+\s+@\$', current_line) and not 'Item Total' in current_line:
+                # Check for IMEI/ICCID (excludes this from being an accessory)
+                if 'IMEI:' in current_line:
+                    has_imei = True
+                if 'ICCID:' in current_line:
+                    has_iccid = True
+                
+                # Capture the description (usually on the next line after item code)
+                if j == i + 1 and not re.match(r'^\d+\s*@\$', current_line) and current_line:
+                    item_description = current_line
+                elif j == i + 2 and not item_description and not re.match(r'^\d+\s*@\$', current_line):
+                    # Sometimes description spans multiple lines
                     item_description += " " + current_line
                 
+                # Capture original price (format: 1 @$XX.XX)
+                price_match = re.search(r'(\d+)\s*@\$(\d+\.?\d*)', current_line)
+                if price_match and original_price == 0:
+                    original_price = float(price_match.group(2))
+                
+                # Capture discount (could be negative value or in Discounts section)
+                if 'Discount' in lines[j-1] if j > 0 else False:
+                    discount_match = re.search(r'-?\$(\d+\.?\d*)', current_line)
+                    if discount_match:
+                        discount = float(discount_match.group(1))
+                
+                # Alternative discount format
+                discount_match = re.search(r'^-\$(\d+\.?\d*)', current_line)
+                if discount_match:
+                    discount = float(discount_match.group(1))
+                
+                # Capture Item Total
                 if 'Item Total' in current_line:
                     total_match = re.search(r'Item Total\s+\$(\d+\.?\d*)', current_line)
                     if total_match:
                         item_total = float(total_match.group(1))
+                        found_item_total = True
                         
-                        full_description = item_description.lower()
+                        # Now determine if this is an accessory
+                        full_description = (item_code + " " + item_description).lower()
+                        
+                        # Exclude if it has IMEI/ICCID
+                        if has_imei or has_iccid:
+                            break
+                        
+                        # Exclude if it matches excluded keywords
                         is_excluded = any(keyword.lower() in full_description for keyword in excluded_keywords)
+                        if is_excluded:
+                            break
                         
-                        if not is_excluded and item_total > 0:
-                            accessory_prices.append(item_total)
-                            app.logger.debug(f"Found accessory: {item_code} - ${item_total} - {item_description.strip()}")
-                        else:
-                            app.logger.debug(f"Excluded item: {item_code} - ${item_total} - {item_description.strip()}")
-                    break
+                        # Include if it matches accessory prefixes or keywords
+                        is_accessory = False
+                        
+                        # Check positive indicators
+                        if any(item_code.startswith(prefix) for prefix in accessory_prefixes):
+                            is_accessory = True
+                        elif any(keyword.lower() in full_description for keyword in accessory_keywords):
+                            is_accessory = True
+                        
+                        if is_accessory and original_price > 0:
+                            # Calculate commissionable price (after discount, before tax)
+                            commissionable_price = original_price - discount
+                            
+                            # Verify against item total if needed (item total includes tax)
+                            # We want the pre-tax amount
+                            if commissionable_price > 0:
+                                accessory_prices.append(commissionable_price)
+                                app.logger.debug(f"Found accessory: {item_code} - {item_description}")
+                                app.logger.debug(f"  Original: ${original_price}, Discount: ${discount}, Commissionable: ${commissionable_price}")
+                        
+                        break
+                
                 j += 1
         i += 1
     
-    accessory_patterns = [
-        r'(HOL\d+|OPE\d+|PRO\d+).*?Item Total\s+\$(\d+\.?\d*)',
-        r'(STW\d+|SCR\d+|GLN\d+).*?Item Total\s+\$(\d+\.?\d*)',
-        r'(CHG\d+|CBL\d+|CAR\d+).*?Item Total\s+\$(\d+\.?\d*)',
-        r'([A-Z]{3}\d{4})(?!.*(?:Motorola|iPhone|Samsung|Unlimited|Cricket|SIM|DEVICE)).*?Item Total\s+\$(\d+\.?\d*)'
-    ]
+    # Also check for accessories in a simpler format (when structured differently)
+    # Pattern: ITEM_CODE\nDescription\n1 @$XX.XX $XX.XX\nTaxes\n...\nItem Total $XX.XX
+    pattern = r'([A-Z]{2,}[A-Z0-9]{4,})\s*\n([^\n]+?)\s*\n.*?(\d+)\s*@\$(\d+\.?\d*)\s+\$\d+\.?\d*(?:.*?Discounts?\s*\n.*?-\$(\d+\.?\d*))?.*?Item Total\s+\$(\d+\.?\d*)'
     
-    for pattern in accessory_patterns:
-        matches = re.finditer(pattern, pdf_text, re.DOTALL | re.IGNORECASE)
-        for match in matches:
-            if len(match.groups()) >= 2:
-                item_code = match.group(1)
-                price = float(match.group(2))
-                
-                if price not in accessory_prices and price > 0:
-                    accessory_prices.append(price)
-                    app.logger.debug(f"Found accessory (pattern): {item_code} - ${price}")
+    matches = re.finditer(pattern, pdf_text, re.DOTALL)
+    for match in matches:
+        item_code = match.group(1)
+        description = match.group(2)
+        quantity = int(match.group(3))
+        original_price = float(match.group(4))
+        discount = float(match.group(5)) if match.group(5) else 0.0
+        
+        # Skip if already processed
+        commissionable = original_price - discount
+        if commissionable in accessory_prices:
+            continue
+        
+        # Check if this section contains IMEI or ICCID
+        section_text = match.group(0)
+        if 'IMEI:' in section_text or 'ICCID:' in section_text:
+            continue
+        
+        # Apply exclusion rules
+        if any(item_code.startswith(prefix) for prefix in excluded_prefixes):
+            continue
+        
+        full_text = (item_code + " " + description).lower()
+        if any(keyword.lower() in full_text for keyword in excluded_keywords):
+            continue
+        
+        # Check for positive accessory indicators
+        is_accessory = False
+        if any(item_code.startswith(prefix) for prefix in accessory_prefixes):
+            is_accessory = True
+        elif any(keyword.lower() in full_text for keyword in accessory_keywords):
+            is_accessory = True
+        
+        if is_accessory and commissionable > 0:
+            accessory_prices.append(commissionable)
+            app.logger.debug(f"Found accessory (pattern): {item_code} - {description} - Commissionable: ${commissionable}")
     
-    total_price = round(sum(accessory_prices), 2)
-    app.logger.debug(f"Total accessories: ${total_price}, Items: {accessory_prices}")
+    # Remove duplicates and calculate total
+    unique_prices = list(set(accessory_prices))
+    total_price = round(sum(unique_prices), 2)
     
-    return total_price, accessory_prices
+    app.logger.debug(f"Total accessories (commissionable): ${total_price}, Items: {unique_prices}")
+    
+    return total_price, unique_prices
 
 def extract_info_from_pdf(file_stream):
     try:
