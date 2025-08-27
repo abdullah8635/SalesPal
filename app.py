@@ -1245,10 +1245,9 @@ def extract_info_from_pdf(file_stream):
         activations_count = 0
         ppp_present = False
         activation_fee_sum = 0.0
-        upgrades_count = 0
-        upgrade_fee_sum = 0.0
         pairs = []
 
+        # Extract basic information
         store_match = re.search(r'(\d+):\s*([A-Za-z\s]+)', pdf_text)
         if store_match:
             company_name = f"{store_match.group(1)}: {store_match.group(2).strip()}"
@@ -1274,36 +1273,34 @@ def extract_info_from_pdf(file_stream):
             rq_invoice = f"R{rq_invoice_match.group(1)}"
             app.logger.debug(f"Found RQ invoice: {rq_invoice}")
 
-        imei_matches = re.findall(r'IMEI:(\d{15})', pdf_text)
-        iccid_matches = re.findall(r'ICCID:(\d{19,20})', pdf_text)
-        
-        for i, imei in enumerate(imei_matches):
-            if i < len(iccid_matches):
-                pairs.append({'imei': imei, 'iccid': iccid_matches[i]})
-        
-        app.logger.debug(f"Found {len(pairs)} IMEI/ICCID pairs")
+        # IMPROVED IMEI/ICCID EXTRACTION - Find unique pairs
+        imei_iccid_pairs = extract_unique_imei_iccid_pairs(pdf_text)
+        pairs = imei_iccid_pairs
+        app.logger.debug(f"Found {len(pairs)} unique IMEI/ICCID pairs")
 
-        activation_fees = re.findall(r'Activation Fee.*?@\$(\d+\.?\d*)', pdf_text, re.DOTALL)
-        activations_count = len(activation_fees)
+        # IMPROVED ACTIVATION FEE CALCULATION
+        activation_fee_details = extract_activation_fees(pdf_text)
+        activation_fee_sum = activation_fee_details['average']
+        activations_count = activation_fee_details['count']
         
-        activation_fee_sum = sum(float(fee) for fee in activation_fees if fee)
+        app.logger.debug(f"Activation fees: {activation_fee_details['individual_fees']}")
+        app.logger.debug(f"Average activation fee: ${activation_fee_sum}")
+        app.logger.debug(f"Total activations: {activations_count}")
 
+        # Upgrade fees (separate from activation fees)
         upgrade_fees = re.findall(r'Upgrade Fee\s*(\d+)?\s*@\$(\d+\.?\d*)', pdf_text, re.IGNORECASE)
+        upgrades_count = 0
         for qty_str, price_str in upgrade_fees:
             qty = int(qty_str) if qty_str else 1
-            price = float(price_str)
             upgrades_count += qty
-            upgrade_fee_sum += qty * price
 
-        app.logger.debug(f"Found {upgrades_count} upgrades, total fees: ${upgrade_fee_sum}")
-      
-        app.logger.debug(f"Found {activations_count} activations, total fees: ${activation_fee_sum}")
+        app.logger.debug(f"Found {upgrades_count} upgrades")
 
-        upgrades_count = 0
-
-        ppp_present = bool(re.search(r'Cricket Protection Plan|Protection Plan', pdf_text, re.IGNORECASE))
+        # PPP Detection
+        ppp_present = bool(re.search(r'Cricket Protection Plan|Protection Plan|PROTECTON', pdf_text, re.IGNORECASE))
         app.logger.debug(f"PPP present: {ppp_present}")
 
+        # Calculate accessories
         try:
             accessories_total, accessory_prices_list = calculate_accessories_cricket(pdf_text)
             total_price = accessories_total
@@ -1313,6 +1310,7 @@ def extract_info_from_pdf(file_stream):
             total_price = 0.0
             accessory_prices_list = []
 
+        # Validation
         required_fields = [company_name, customer, order_date, sales_person, rq_invoice]
         missing_fields = []
         
@@ -1329,7 +1327,6 @@ def extract_info_from_pdf(file_stream):
 
         if missing_fields:
             app.logger.error(f"Missing required fields: {missing_fields}")
-            app.logger.debug(f"Extracted values - Company: {company_name}, Customer: {customer}, Date: {order_date}, Sales: {sales_person}, Invoice: {rq_invoice}")
             raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
 
         return [
@@ -1349,8 +1346,144 @@ def extract_info_from_pdf(file_stream):
 
     except Exception as e:
         app.logger.error(f"Error extracting data from PDF: {str(e)}")
-        app.logger.debug(f"PDF text for debugging: {pdf_text[:2000]}...")
         raise ValueError(f"Error during PDF extraction: {str(e)}")
+
+def extract_unique_imei_iccid_pairs(pdf_text):
+    """
+    Extract unique IMEI/ICCID pairs from Cricket receipt text.
+    Each device should have a unique IMEI and ICCID pair.
+    """
+    pairs = []
+    
+    # Find all IMEI and ICCID numbers
+    imei_matches = re.findall(r'IMEI:(\d{15})', pdf_text)
+    iccid_matches = re.findall(r'ICCID:(\d{19,20})', pdf_text)
+    
+    app.logger.debug(f"Raw IMEI matches: {imei_matches}")
+    app.logger.debug(f"Raw ICCID matches: {iccid_matches}")
+    
+    # Remove duplicates while preserving order
+    unique_imeis = []
+    unique_iccids = []
+    
+    for imei in imei_matches:
+        if imei not in unique_imeis:
+            unique_imeis.append(imei)
+    
+    for iccid in iccid_matches:
+        if iccid not in unique_iccids:
+            unique_iccids.append(iccid)
+    
+    app.logger.debug(f"Unique IMEIs: {unique_imeis}")
+    app.logger.debug(f"Unique ICCIDs: {unique_iccids}")
+    
+    # Alternative method: Extract IMEI/ICCID pairs by proximity
+    # Look for patterns where IMEI and ICCID appear close together
+    lines = pdf_text.split('\n')
+    
+    for i, line in enumerate(lines):
+        imei_match = re.search(r'IMEI:(\d{15})', line)
+        if imei_match:
+            imei = imei_match.group(1)
+            
+            # Look for corresponding ICCID in nearby lines (within 10 lines)
+            iccid = None
+            for j in range(max(0, i-5), min(len(lines), i+10)):
+                iccid_match = re.search(r'ICCID:(\d{19,20})', lines[j])
+                if iccid_match:
+                    potential_iccid = iccid_match.group(1)
+                    
+                    # Check if this IMEI/ICCID pair is already added
+                    pair_exists = any(p['imei'] == imei and p['iccid'] == potential_iccid for p in pairs)
+                    if not pair_exists:
+                        iccid = potential_iccid
+                        break
+            
+            if iccid:
+                # Double-check this pair isn't already in our list
+                pair_exists = any(p['imei'] == imei and p['iccid'] == iccid for p in pairs)
+                if not pair_exists:
+                    pairs.append({'imei': imei, 'iccid': iccid})
+                    app.logger.debug(f"Found unique pair: IMEI {imei} -> ICCID {iccid}")
+    
+    # Fallback: if proximity method didn't work well, pair them sequentially
+    if len(pairs) < min(len(unique_imeis), len(unique_iccids)):
+        pairs = []
+        for i in range(min(len(unique_imeis), len(unique_iccids))):
+            pairs.append({'imei': unique_imeis[i], 'iccid': unique_iccids[i]})
+    
+    app.logger.debug(f"Final unique pairs: {pairs}")
+    return pairs
+
+
+def extract_activation_fees(pdf_text):
+    """
+    Extract activation fees and calculate average.
+    Returns details including individual fees, count, and average.
+    """
+    activation_fees = []
+    
+    # Find all activation fee entries
+    # Pattern 1: "Activation Fee 1 @$25.00 $25.00"
+    fee_pattern1 = re.findall(r'Activation Fee\s+(\d+)?\s*@\$(\d+\.?\d*)', pdf_text, re.IGNORECASE)
+    
+    for qty_str, price_str in fee_pattern1:
+        qty = int(qty_str) if qty_str else 1
+        price = float(price_str)
+        # Add individual fees for each quantity
+        for _ in range(qty):
+            activation_fees.append(price)
+    
+    # Pattern 2: Simple "Activation Fee" followed by price
+    fee_pattern2 = re.findall(r'Activation Fee.*?\$(\d+\.?\d*)', pdf_text, re.IGNORECASE | re.DOTALL)
+    
+    # Only use pattern2 if pattern1 didn't find anything
+    if not activation_fees:
+        for price_str in fee_pattern2:
+            price = float(price_str)
+            activation_fees.append(price)
+    
+    # Pattern 3: Look for "Activation Fee" line followed by Item Total
+    lines = pdf_text.split('\n')
+    for i, line in enumerate(lines):
+        if 'Activation Fee' in line and '@$' in line:
+            # Extract price from this line
+            price_match = re.search(r'@\$(\d+\.?\d*)', line)
+            if price_match:
+                price = float(price_match.group(1))
+                
+                # Check if there's a discount in nearby lines
+                discounted_price = price
+                for j in range(i+1, min(len(lines), i+10)):
+                    if 'Item Total' in lines[j]:
+                        total_match = re.search(r'Item Total\s+\$(\d+\.?\d*)', lines[j])
+                        if total_match:
+                            discounted_price = float(total_match.group(1))
+                            break
+                
+                # Only add if we haven't already found this fee
+                if discounted_price not in activation_fees:
+                    activation_fees.append(discounted_price)
+    
+    # Remove duplicates and calculate stats
+    if activation_fees:
+        count = len(activation_fees)
+        average = sum(activation_fees) / count
+        
+        app.logger.debug(f"Individual activation fees: {activation_fees}")
+        app.logger.debug(f"Count: {count}, Average: ${average:.2f}")
+        
+        return {
+            'individual_fees': activation_fees,
+            'count': count,
+            'average': round(average, 2)
+        }
+    else:
+        return {
+            'individual_fees': [],
+            'count': 0,
+            'average': 0.0
+        }
 
 @app.route('/upload', methods=['GET', 'POST'])
 @login_required
