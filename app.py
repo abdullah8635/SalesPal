@@ -1288,66 +1288,51 @@ def extract_info_from_pdf(file_stream):
         app.logger.debug(f"Total activations: {activations_count}")
 
         # Upgrade fees (separate from activation fees)
-        upgrade_fees = re.findall(r'Upgrade Fee\s*(\d+)?\s*@\$(\d+\.?\d*)', pdf_text, re.IGNORECASE)
-        upgrades_count = 0
-        for qty_str, price_str in upgrade_fees:
-            qty = int(qty_str) if qty_str else 1
-            upgrades_count += qty
-
-        app.logger.debug(f"Found {upgrades_count} upgrades")
-
-        # PPP Detection
-        ppp_present = bool(re.search(r'Cricket Protection Plan|Protection Plan|PROTECTON', pdf_text, re.IGNORECASE))
-        app.logger.debug(f"PPP present: {ppp_present}")
-
-        # Calculate accessories
-        try:
-            accessories_total, accessory_prices_list = calculate_accessories_cricket(pdf_text)
-            total_price = accessories_total
-            app.logger.debug(f"Calculated accessories total: ${total_price}")
-        except Exception as e:
-            app.logger.warning(f"Error calculating accessories: {e}")
-            total_price = 0.0
-            accessory_prices_list = []
-
-        # Validation
-        required_fields = [company_name, customer, order_date, sales_person, rq_invoice]
-        missing_fields = []
+        upgrade_ not in line and 'Item Total' not in line:
+                # Look ahead for the price line
+                for j in range(i+1, min(len(lines), i+8)):
+                    next_line = lines[j].strip()
+                    
+                    # Look for @$ pattern indicating the base price
+                    price_match = re.search(r'(\d+)?\s*@\$(\d+\.?\d*)', next_line)
+                    if price_match:
+                        qty = int(price_match.group(1)) if price_match.group(1) else 1
+                        base_price = float(price_match.group(2))
+                        
+                        for _ in range(qty):
+                            activation_fees.append(base_price)
+                        
+                        app.logger.debug(f"Found activation fee (manual): {qty} x ${base_price}")
+                        break
+    
+    # Remove exact duplicates only (not similar values)
+    unique_fees = []
+    for fee in activation_fees:
+        if fee not in unique_fees:
+            unique_fees.append(fee)
+    
+    activation_fees = unique_fees
+    
+    # Calculate stats
+    if activation_fees:
+        count = len(activation_fees)
+        average = sum(activation_fees) / count
         
-        if not company_name:
-            missing_fields.append("company_name")
-        if not customer:
-            missing_fields.append("customer")
-        if not order_date:
-            missing_fields.append("order_date")
-        if not sales_person:
-            missing_fields.append("sales_person")
-        if not rq_invoice:
-            missing_fields.append("rq_invoice")
-
-        if missing_fields:
-            app.logger.error(f"Missing required fields: {missing_fields}")
-            raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
-
-        return [
-            company_name,
-            customer,
-            order_date,
-            sales_person,
-            rq_invoice,
-            total_price,
-            accessory_prices_list,
-            upgrades_count,
-            activations_count,
-            ppp_present,
-            pairs,
-            activation_fee_sum
-        ]
-
-    except Exception as e:
-        app.logger.error(f"Error extracting data from PDF: {str(e)}")
-        raise ValueError(f"Error during PDF extraction: {str(e)}")
-
+        app.logger.debug(f"Individual activation fees: {activation_fees}")
+        app.logger.debug(f"Count: {count}, Average: ${average:.2f}")
+        
+        return {
+            'individual_fees': activation_fees,
+            'count': count,
+            'average': round(average, 2)
+        }
+    else:
+        return {
+            'individual_fees': [],
+            'count': 0,
+            'average': 0.0
+        }
+      
 def extract_unique_imei_iccid_pairs(pdf_text):
     """
     Extract unique IMEI/ICCID pairs from Cricket receipt text.
@@ -1420,52 +1405,33 @@ def extract_activation_fees(pdf_text):
     """
     Extract activation fees and calculate average.
     Returns details including individual fees, count, and average.
+    Focus on base activation fee amounts, not taxed totals.
     """
     activation_fees = []
     
-    # Find all activation fee entries
-    # Pattern 1: "Activation Fee 1 @$25.00 $25.00"
-    fee_pattern1 = re.findall(r'Activation Fee\s+(\d+)?\s*@\$(\d+\.?\d*)', pdf_text, re.IGNORECASE)
+    # Pattern 1: Look for "Activation Fee" followed by price format
+    # Example: "Activation Fee 1 @$25.00 $25.00"
+    activation_pattern = re.findall(r'Activation Fee\s+(\d+)?\s*@\$(\d+\.?\d*)', pdf_text, re.IGNORECASE)
     
-    for qty_str, price_str in fee_pattern1:
+    for qty_str, price_str in activation_pattern:
         qty = int(qty_str) if qty_str else 1
-        price = float(price_str)
-        # Add individual fees for each quantity
+        base_price = float(price_str)
+        
+        # Add the base price for each activation (this is the commissionable amount)
         for _ in range(qty):
-            activation_fees.append(price)
+            activation_fees.append(base_price)
+        
+        app.logger.debug(f"Found activation fee pattern: {qty} x ${base_price}")
     
-    # Pattern 2: Simple "Activation Fee" followed by price
-    fee_pattern2 = re.findall(r'Activation Fee.*?\$(\d+\.?\d*)', pdf_text, re.IGNORECASE | re.DOTALL)
-    
-    # Only use pattern2 if pattern1 didn't find anything
+    # Pattern 2: If no pattern matches found, look for "Activation Fee" sections manually
     if not activation_fees:
-        for price_str in fee_pattern2:
-            price = float(price_str)
-            activation_fees.append(price)
+        lines = pdf_text.split('\n')
+        
+        for i, line in enumerate(lines):
+            # Look for standalone "Activation Fee" line
+            if 'Activation Fee' in line and '@
     
-    # Pattern 3: Look for "Activation Fee" line followed by Item Total
-    lines = pdf_text.split('\n')
-    for i, line in enumerate(lines):
-        if 'Activation Fee' in line and '@$' in line:
-            # Extract price from this line
-            price_match = re.search(r'@\$(\d+\.?\d*)', line)
-            if price_match:
-                price = float(price_match.group(1))
-                
-                # Check if there's a discount in nearby lines
-                discounted_price = price
-                for j in range(i+1, min(len(lines), i+10)):
-                    if 'Item Total' in lines[j]:
-                        total_match = re.search(r'Item Total\s+\$(\d+\.?\d*)', lines[j])
-                        if total_match:
-                            discounted_price = float(total_match.group(1))
-                            break
-                
-                # Only add if we haven't already found this fee
-                if discounted_price not in activation_fees:
-                    activation_fees.append(discounted_price)
-    
-    # Remove duplicates and calculate stats
+    # Calculate stats
     if activation_fees:
         count = len(activation_fees)
         average = sum(activation_fees) / count
@@ -1510,52 +1476,56 @@ def upload_pdf():
         parsed_data_list = []
 
         for file in files:
-            try:
-                if file and allowed_file(file.filename):
-                    filename = secure_filename(file.filename)
-                    content = file.read()
-                    if not content:
-                        raise ValueError("Empty file")
+    try:
+        if file and allowed_file(file.filename):
+            filename = secure_filename(file.filename)
+            content = file.read()
+            if not content:
+                raise ValueError("Empty file")
 
-                    reader = PyPDF2.PdfReader(io.BytesIO(content))
-                    if not reader.pages:
-                        raise ValueError("PDF has no pages")
+            reader = PyPDF2.PdfReader(io.BytesIO(content))
+            if not reader.pages:
+                raise ValueError("PDF has no pages")
 
-                    text = ''.join(page.extract_text() or '' for page in reader.pages)
-                    if not text.strip():
-                        raise ValueError("PDF contains no text")
+            text = ''.join(page.extract_text() or '' for page in reader.pages)
+            if not text.strip():
+                raise ValueError("PDF contains no text")
 
-                    parsed = extract_info_from_pdf(io.BytesIO(content))
-                    (company_name, customer, order_date, sales_person, rq_invoice,
-                     total_price, accessories_prices, upgrades_count, activations_count,
-                     ppp_present, pairs, activation_fee_sum) = parsed
+            parsed = extract_info_from_pdf(io.BytesIO(content))
+            (company_name, customer, order_date, sales_person, rq_invoice,
+             total_price, accessories_prices, upgrades_count, activations_count,
+             ppp_present, pairs, activation_fee_sum) = parsed
 
-                    required = [company_name, customer, order_date, sales_person, rq_invoice]
-                    if not all(required):
-                        raise ValueError("Missing required fields in PDF")
+            required = [company_name, customer, order_date, sales_person, rq_invoice]
+            if not all(required):
+                raise ValueError("Missing required fields in PDF")
 
-                    parsed_data_list.append({
-                        'filename': filename,
-                        'company_name': company_name,
-                        'customer': customer,
-                        'order_date': order_date,
-                        'sales_person': sales_person,
-                        'rq_invoice': rq_invoice,
-                        'total_price': total_price,
-                        'accessories_prices': accessories_prices,
-                        'upgrades_count': upgrades_count,
-                        'activations_count': activations_count,
-                        'ppp_present': ppp_present,
-                        'activation_fee_sum': activation_fee_sum,
-                        'imei_iccid_pairs': pairs,
-                        'pdf_text': text
-                    })
+            # IMPORTANT: Extract activation fee details again to store in session
+            activation_fee_details = extract_activation_fees(text)
 
-                else:
-                    raise ValueError("Invalid file format")
-            except Exception as e:
-                app.logger.error(f"Error parsing {file.filename}: {str(e)}")
-                errors.append(f"{file.filename}: {str(e)}")
+            parsed_data_list.append({
+                'filename': filename,
+                'company_name': company_name,
+                'customer': customer,
+                'order_date': order_date,
+                'sales_person': sales_person,
+                'rq_invoice': rq_invoice,
+                'total_price': total_price,
+                'accessories_prices': accessories_prices,
+                'upgrades_count': upgrades_count,
+                'activations_count': activations_count,
+                'ppp_present': ppp_present,
+                'activation_fee_sum': activation_fee_sum,
+                'activation_fee_details': activation_fee_details,  # ADD THIS LINE
+                'imei_iccid_pairs': pairs,
+                'pdf_text': text
+            })
+
+        else:
+            raise ValueError("Invalid file format")
+    except Exception as e:
+        app.logger.error(f"Error parsing {file.filename}: {str(e)}")
+        errors.append(f"{file.filename}: {str(e)}")
 
         if not parsed_data_list:
             return jsonify({
@@ -1650,15 +1620,24 @@ def confirm_receipt():
 
             return redirect(url_for('confirm_receipt'))
 
-        current_pdf['logged_in_user'] = logged_in_user
-        total_pdfs = len(parsed_data_list)
-        current_number = current_index + 1
+        # Prepare template data
+        template_data = current_pdf.copy()
+        template_data['logged_in_user'] = logged_in_user
+        template_data['total_pdfs'] = len(parsed_data_list)
+        template_data['current_pdf_number'] = current_index + 1
 
-        return render_template('confirm_receipt.html',
-                               current_user=logged_in_user,
-                               total_pdfs=total_pdfs,
-                               current_pdf_number=current_number,
-                               **current_pdf)
+        # Add activation fee details if available
+        if 'activation_fee_details' in current_pdf:
+            template_data['activation_fee_details'] = current_pdf['activation_fee_details']
+        else:
+            # Create a simple structure if not available
+            template_data['activation_fee_details'] = {
+                'individual_fees': [],
+                'count': current_pdf.get('activations_count', 0),
+                'average': current_pdf.get('activation_fee_sum', 0)
+            }
+
+        return render_template('confirm_receipt.html', **template_data)
 
     except Exception as e:
         app.logger.error(f"Unexpected error in confirm_receipt: {str(e)}")
