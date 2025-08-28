@@ -520,16 +520,46 @@ def non_admin_dashboard():
 @login_required
 def delete_receipt(receipt_id):
     try:
+        app.logger.info(f"Delete request for receipt ID: {receipt_id} by user: {current_user.id}")
+        
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
+                # First check if receipt exists and user has permission
+                cursor.execute("""
+                    SELECT user_id, rq_invoice 
+                    FROM parsed_receipts 
+                    WHERE id = %s
+                """, (receipt_id,))
+                receipt = cursor.fetchone()
+                
+                if not receipt:
+                    app.logger.warning(f"Receipt {receipt_id} not found")
+                    flash('Receipt not found.', 'error')
+                    return redirect(url_for('view_receipts'))
+                
+                # Check permission (user can only delete their own receipts unless admin)
+                if not current_user.is_admin and receipt[0] != int(current_user.id):
+                    app.logger.warning(f"User {current_user.id} attempted to delete receipt {receipt_id} belonging to user {receipt[0]}")
+                    flash('You can only delete your own receipts.', 'error')
+                    return redirect(url_for('view_receipts'))
+                
+                # Delete the receipt
                 cursor.execute("DELETE FROM parsed_receipts WHERE id = %s", (receipt_id,))
-                conn.commit()
+                
+                if cursor.rowcount == 0:
+                    app.logger.warning(f"No rows affected when deleting receipt {receipt_id}")
+                    flash('Receipt could not be deleted.', 'error')
+                else:
+                    conn.commit()
+                    app.logger.info(f"Successfully deleted receipt {receipt[1]} (ID: {receipt_id})")
+                    flash('Receipt deleted successfully.', 'success')
                 
         return redirect(url_for('view_receipts'))
         
     except Exception as e:
         app.logger.error(f"Error deleting receipt {receipt_id}: {str(e)}")
-        return "Error deleting receipt", 500
+        flash('An error occurred while deleting the receipt.', 'error')
+        return redirect(url_for('view_receipts'))
 
 def round_up(value, decimals=2):
     factor = 10 ** decimals
