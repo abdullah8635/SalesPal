@@ -286,6 +286,7 @@ class User(UserMixin):
         self.id = str(id)
         self.name = name
         self.is_admin = is_admin
+        self.username = username
 
     def get_id(self):
         return self.id
@@ -371,13 +372,14 @@ def load_user(user_id):
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (user_id,))
+                cursor.execute("SELECT id, name, is_admin, username FROM users WHERE id = %s", (user_id,))
                 user_data = cursor.fetchone()
                 if user_data:
                     return User(
                         id=user_data[0],
                         name=user_data[1],
-                        is_admin=user_data[2] == 1
+                        is_admin=user_data[2] == 1,
+                        username=user_data[3]  # Add this line
                     )
         return None
     except Exception as e:
