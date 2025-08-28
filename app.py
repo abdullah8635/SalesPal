@@ -211,8 +211,8 @@ app.config.update(
     SESSION_COOKIE_SAMESITE='Lax', 
     DB_HOST='localhost',
     DB_NAME='salespal',
-    DB_USER='yourusername',
-    DB_PASSWORD='yourpassword'
+    DB_USER='postgres',
+    DB_PASSWORD=''
 )
 
 # SINGLE DATABASE POOL CONFIGURATION
