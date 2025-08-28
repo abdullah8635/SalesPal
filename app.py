@@ -1288,50 +1288,65 @@ def extract_info_from_pdf(file_stream):
         app.logger.debug(f"Total activations: {activations_count}")
 
         # Upgrade fees (separate from activation fees)
-        upgrade_ not in line and 'Item Total' not in line:
-                # Look ahead for the price line
-                for j in range(i+1, min(len(lines), i+8)):
-                    next_line = lines[j].strip()
-                    
-                    # Look for @$ pattern indicating the base price
-                    price_match = re.search(r'(\d+)?\s*@\$(\d+\.?\d*)', next_line)
-                    if price_match:
-                        qty = int(price_match.group(1)) if price_match.group(1) else 1
-                        base_price = float(price_match.group(2))
-                        
-                        for _ in range(qty):
-                            activation_fees.append(base_price)
-                        
-                        app.logger.debug(f"Found activation fee (manual): {qty} x ${base_price}")
-                        break
-    
-    # Remove exact duplicates only (not similar values)
-    unique_fees = []
-    for fee in activation_fees:
-        if fee not in unique_fees:
-            unique_fees.append(fee)
-    
-    activation_fees = unique_fees
-    
-    # Calculate stats
-    if activation_fees:
-        count = len(activation_fees)
-        average = sum(activation_fees) / count
+        upgrade_fees = re.findall(r'Upgrade Fee\s*(\d+)?\s*@\$(\d+\.?\d*)', pdf_text, re.IGNORECASE)
+        upgrades_count = 0
+        for qty_str, price_str in upgrade_fees:
+            qty = int(qty_str) if qty_str else 1
+            upgrades_count += qty
+
+        app.logger.debug(f"Found {upgrades_count} upgrades")
+
+        # PPP Detection
+        ppp_present = bool(re.search(r'Cricket Protection Plan|Protection Plan|PROTECTON', pdf_text, re.IGNORECASE))
+        app.logger.debug(f"PPP present: {ppp_present}")
+
+        # Calculate accessories
+        try:
+            accessories_total, accessory_prices_list = calculate_accessories_cricket(pdf_text)
+            total_price = accessories_total
+            app.logger.debug(f"Calculated accessories total: ${total_price}")
+        except Exception as e:
+            app.logger.warning(f"Error calculating accessories: {e}")
+            total_price = 0.0
+            accessory_prices_list = []
+
+        # Validation
+        required_fields = [company_name, customer, order_date, sales_person, rq_invoice]
+        missing_fields = []
         
-        app.logger.debug(f"Individual activation fees: {activation_fees}")
-        app.logger.debug(f"Count: {count}, Average: ${average:.2f}")
-        
-        return {
-            'individual_fees': activation_fees,
-            'count': count,
-            'average': round(average, 2)
-        }
-    else:
-        return {
-            'individual_fees': [],
-            'count': 0,
-            'average': 0.0
-        }
+        if not company_name:
+            missing_fields.append("company_name")
+        if not customer:
+            missing_fields.append("customer")
+        if not order_date:
+            missing_fields.append("order_date")
+        if not sales_person:
+            missing_fields.append("sales_person")
+        if not rq_invoice:
+            missing_fields.append("rq_invoice")
+
+        if missing_fields:
+            app.logger.error(f"Missing required fields: {missing_fields}")
+            raise ValueError(f"Missing required fields: {', '.join(missing_fields)}")
+
+        return [
+            company_name,
+            customer,
+            order_date,
+            sales_person,
+            rq_invoice,
+            total_price,
+            accessory_prices_list,
+            upgrades_count,
+            activations_count,
+            ppp_present,
+            pairs,
+            activation_fee_sum
+        ]
+
+    except Exception as e:
+        app.logger.error(f"Error extracting data from PDF: {str(e)}")
+        raise ValueError(f"Error during PDF extraction: {str(e)}")
       
 def extract_unique_imei_iccid_pairs(pdf_text):
     """
