@@ -762,7 +762,7 @@ def login():
                                 user = User(
                                     id=user_id,
                                     name=name,
-                                    is_admin=is_admin == 1
+                                    is_admin=is_admin == 1,
                                     username=db_username
                                 )
                                 
