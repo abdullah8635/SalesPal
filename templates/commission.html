@@ -432,6 +432,102 @@
         .confetti:nth-child(29) { background-color: #44ffaa; left: 43%; animation-delay: 2.8s; }
         .confetti:nth-child(30) { background-color: #ff44aa; left: 48%; animation-delay: 2.9s; }
         
+        /* Commission Summary Styles */
+        .commission-summary {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .commission-summary h3 {
+            text-align: center;
+            margin-bottom: 1.5rem;
+            color: rgb(67, 177, 43);
+            font-size: 1.3rem;
+        }
+        
+        .commission-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .commission-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .commission-item .label {
+            font-weight: 500;
+            color: #666;
+        }
+        
+        .commission-item .value {
+            font-weight: 700;
+            color: rgb(38, 156, 224);
+            font-size: 1.1rem;
+        }
+        
+        .requirements-status {
+            border-top: 1px solid #dee2e6;
+            padding-top: 1.5rem;
+        }
+        
+        .requirements-status h4 {
+            text-align: center;
+            margin-bottom: 1rem;
+            color: #666;
+            font-size: 1.1rem;
+        }
+        
+        .requirement-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem;
+            margin-bottom: 0.5rem;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .requirement-label {
+            font-weight: 500;
+            color: #666;
+        }
+        
+        .status {
+            font-weight: 600;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+        }
+        
+        .status.pending {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .status.met {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.not-met {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
     </style>
 </head>
 <body>
@@ -476,6 +572,13 @@
                         <th>Total Devices</th>
                         <th>Accessories</th>
                         <th>Current Tier</th>
+                        <th>Total Commission</th>
+                        <th>Activation</th>
+                        <th>Upgrade</th>
+                        <th>Protection</th>
+                        <th>Accessory</th>
+                        <th>APO</th>
+                        <th>Accessory Rate</th>
                     </tr>
                     {% for row in commission_data %}
                     <tr>
@@ -486,6 +589,13 @@
                         <td>{{ row[4] }}</td>
                         <td>${{ "%.2f"|format(row[5]) }}</td>
                         <td>{{ row[6] }}</td>
+                        <td>${{ "%.2f"|format(row[7]) }}</td>
+                        <td>${{ "%.2f"|format(row[8]) }}</td>
+                        <td>${{ "%.2f"|format(row[9]) }}</td>
+                        <td>${{ "%.2f"|format(row[10]) }}</td>
+                        <td>${{ "%.2f"|format(row[11]) }}</td>
+                        <td>${{ "%.2f"|format(row[12]) }}</td>
+                        <td>{{ "%.1f"|format(row[13]) }}%</td>
                     </tr>
                     {% endfor %}
                 </table>
@@ -510,6 +620,52 @@
                     <br>Maximum tier achieved! 🎯
                     {% endif %}
                     <br>
+                </div>
+            </div>
+            <div class="commission-summary">
+                <h3>Commission Summary</h3>
+                <div class="commission-grid">
+                    <div class="commission-item">
+                        <span class="label">Total Commission:</span>
+                        <span class="value">${{ "%.2f"|format(commission_data[0][7]) }}</span>
+                    </div>
+                    <div class="commission-item">
+                        <span class="label">Activation:</span>
+                        <span class="value">${{ "%.2f"|format(commission_data[0][8]) }}</span>
+                    </div>
+                    <div class="commission-item">
+                        <span class="label">Upgrade:</span>
+                        <span class="value">${{ "%.2f"|format(commission_data[0][9]) }}</span>
+                    </div>
+                    <div class="commission-item">
+                        <span class="label">Protection:</span>
+                        <span class="value">${{ "%.2f"|format(commission_data[0][10]) }}</span>
+                    </div>
+                    <div class="commission-item">
+                        <span class="label">Accessory:</span>
+                        <span class="value">${{ "%.2f"|format(commission_data[0][11]) }}</span>
+                    </div>
+                    <div class="commission-item">
+                        <span class="label">APO:</span>
+                        <span class="value">${{ "%.2f"|format(commission_data[0][12]) }}</span>
+                    </div>
+                    <div class="commission-item">
+                        <span class="label">Accessory Rate:</span>
+                        <span class="value">{{ "%.1f"|format(commission_data[0][13]) }}%</span>
+                    </div>
+                </div>
+                
+                <!-- Requirements Status -->
+                <div class="requirements-status">
+                    <h4>Requirements Status</h4>
+                    <div class="requirement-item">
+                        <span class="requirement-label">Protection (CP):</span>
+                        <span class="status pending">⚠️ Not yet calculated</span>
+                    </div>
+                    <div class="requirement-item">
+                        <span class="requirement-label">Autopay (AP):</span>
+                        <span class="status pending">⚠️ Not yet calculated</span>
+                    </div>
                 </div>
             </div>
             {% endif %}
