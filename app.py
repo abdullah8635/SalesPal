@@ -212,7 +212,7 @@ app.config.update(
     DB_HOST='localhost',
     DB_NAME='salespal',
     DB_USER='postgres',
-    DB_PASSWORD=''
+    DB_PASSWORD='hi'
 )
 
 # SINGLE DATABASE POOL CONFIGURATION
