@@ -358,6 +358,38 @@
                 font-size: 0.9rem;
             }
         }
+
+        .confetti {
+            position: fixed;
+            width: 10px;
+            height: 10px;
+            background-color: #f0f;
+            animation: confetti-fall 3s linear infinite;
+            z-index: 9999;
+        }
+
+        @keyframes confetti-fall {
+            0% {
+                transform: translateY(-100vh) rotate(0deg);
+                opacity: 1;
+            }
+            100% {
+                transform: translateY(100vh) rotate(720deg);
+                opacity: 0;
+            }
+        }
+
+        .confetti:nth-child(1) { background-color: #ff0000; left: 10%; animation-delay: 0s; }
+        .confetti:nth-child(2) { background-color: #00ff00; left: 20%; animation-delay: 0.2s; }
+        .confetti:nth-child(3) { background-color: #0000ff; left: 30%; animation-delay: 0.4s; }
+        .confetti:nth-child(4) { background-color: #ffff00; left: 40%; animation-delay: 0.6s; }
+        .confetti:nth-child(5) { background-color: #ff00ff; left: 50%; animation-delay: 0.8s; }
+        .confetti:nth-child(6) { background-color: #00ffff; left: 60%; animation-delay: 1s; }
+        .confetti:nth-child(7) { background-color: #ff8800; left: 70%; animation-delay: 1.2s; }
+        .confetti:nth-child(8) { background-color: #8800ff; left: 80%; animation-delay: 1.4s; }
+        .confetti:nth-child(9) { background-color: #ff0088; left: 90%; animation-delay: 1.6s; }
+        .confetti:nth-child(10) { background-color: #88ff00; left: 95%; animation-delay: 1.8s; }
+        
     </style>
 </head>
 <body>
@@ -450,5 +482,33 @@
             </div>
         </div>
     </main>
+    <div id="confetti-container"></div>
+
+    <script>
+        // Confetti function
+        function createConfetti() {
+            const container = document.getElementById('confetti-container');
+            container.innerHTML = ''; // Clear existing confetti
+            
+            for (let i = 0; i < 10; i++) {
+                const confetti = document.createElement('div');
+                confetti.className = 'confetti';
+                container.appendChild(confetti);
+            }
+            
+            // Remove confetti after animation completes
+            setTimeout(() => {
+                container.innerHTML = '';
+            }, 3000);
+        }
+
+        // Check if tier 4 and trigger confetti
+        {% if not is_admin and current_tier == 4 %}
+        // Wait for page to load, then trigger confetti
+        window.addEventListener('load', function() {
+            setTimeout(createConfetti, 500); // Small delay for dramatic effect
+        });
+        {% endif %}
+    </script>
 </body>
 </html>
