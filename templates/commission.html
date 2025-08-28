@@ -372,7 +372,11 @@
             <div class="pay-period-container">
                 <div class="pay-period-header">
                     <h2>Pay Period: {{ period_display }}</h2>
-                    <h3>{% if is_current_period %}</h3>
+                    
+                <div class="pay-period-header">
+                <h3>{% if is_current_period %}</h3>
+                <div class="pay-period-header">
+                
                     <span class="current-period-badge">Current Period</span>
                     {% endif %}
                 </div>
