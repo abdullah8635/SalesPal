@@ -107,6 +107,90 @@ def is_date_in_pay_period(order_date_str, period_start, period_end):
     
     return period_start <= order_date <= period_end
 
+def detect_plan_type(pdf_text):
+    """Detect plan type from PDF text based on Smart Touch Wireless patterns"""
+    pdf_text_upper = pdf_text.upper()
+    
+    # Count occurrences of each plan type
+    plan_counts = {
+        "60": 0,
+        "55": 0,
+        "30/40": 0
+    }
+    
+    # 60 plans
+    if "60UNLPP1" in pdf_text_upper:
+        plan_counts["60"] += 1
+    
+    # 55 plans
+    if "55UNLPP1" in pdf_text_upper:
+        plan_counts["55"] += 1
+    if "40UNLPP1" in pdf_text_upper:
+        plan_counts["55"] += 1
+    
+    # 30/40 plans
+    if "SELECT 10GB" in pdf_text_upper or "30SELECTPP1" in pdf_text_upper:
+        plan_counts["30/40"] += 1
+    
+    return plan_counts
+
+def calculate_commission(activations_by_plan, upgrades, protection_added, accessories_total, tier, total_devices):
+    """Calculate commission based on Smart Touch Wireless commission structure"""
+    
+    # 1. Plan-based activation commissions
+    activation_commission = 0.0
+    for plan_type, count in activations_by_plan.items():
+        if plan_type == "60":
+            rates = {1: 4.00, 2: 6.00, 3: 10.00, 4: 15.00}
+        elif plan_type == "55":
+            rates = {1: 2.00, 2: 5.00, 3: 7.00, 4: 10.00}
+        elif plan_type == "30/40":
+            rates = {1: 1.00, 2: 1.00, 3: 1.00, 4: 1.00}
+        else:
+            continue
+            
+        activation_commission += count * rates.get(tier, 0.0)
+    
+    # 2. Upgrade commissions
+    upgrade_rates = {1: 3.00, 2: 5.00, 3: 7.00, 4: 10.00}
+    upgrade_commission = upgrades * upgrade_rates.get(tier, 0.0)
+    
+    # 3. Protection (CP) commissions
+    protection_rates = {1: 0.50, 2: 0.75, 3: 1.00, 4: 2.00}
+    protection_commission = protection_added * protection_rates.get(tier, 0.0)
+    
+    # 4. Accessory commissions
+    base_accessory_rate = 0.10  # 10%
+    
+    # Calculate APO (Accessory Per Opportunity)
+    apo = accessories_total / total_devices if total_devices > 0 else 0
+    
+    # APO bonus rates
+    apo_bonus_rates = {1: 0.005, 2: 0.01, 3: 0.025, 4: 0.05}  # 0.5%, 1%, 2.5%, 5%
+    
+    if apo >= 60:
+        total_accessory_rate = base_accessory_rate + apo_bonus_rates.get(tier, 0.0)
+    else:
+        total_accessory_rate = base_accessory_rate
+    
+    accessory_commission = accessories_total * total_accessory_rate
+    
+    # Total commission
+    total_commission = activation_commission + upgrade_commission + protection_commission + accessory_commission
+    
+    return {
+        'total': round(total_commission, 2),
+        'breakdown': {
+            'activation': round(activation_commission, 2),
+            'upgrade': round(upgrade_commission, 2),
+            'protection': round(protection_commission, 2),
+            'accessory': round(accessory_commission, 2),
+            'apo': round(apo, 2),
+            'accessory_rate': round(total_accessory_rate * 100, 1)
+        }
+    }
+
+
 app = Flask(__name__)
 login_manager = LoginManager(app)
 login_manager.init_app(app)
@@ -1915,7 +1999,10 @@ def receipt_details(rq_invoice):
 def commission(period_offset=0):
     try:
         # Calculate the target pay period
-        current_start, current_end, current_period_number = get_current_pay_period()
+        # Use a reference date to determine the base pay period
+        # For now, use current date, but this could be made configurable
+        reference_date = datetime.now()
+        current_start, current_end, current_period_number = get_current_pay_period(reference_date)
         target_period_number = current_period_number + period_offset
         
         # Don't allow negative period numbers
@@ -1966,7 +2053,7 @@ def commission(period_offset=0):
                             user_data[username][4] += (activations or 0) + (upgrades or 0)  # total devices
                             user_data[username][5] += total_price or 0.0  # accessories
                     
-                    # Calculate tiers
+                    # Calculate tiers and commissions
                     commission_data = []
                     for username, data in user_data.items():
                         accessories_total = data[5]
@@ -1981,6 +2068,54 @@ def commission(period_offset=0):
                         else:
                             tier = 1
                         data[6] = tier
+                        
+                        # Get plan counts and protection data from receipts
+                        plan_counts_total = {"60": 0, "55": 0, "30/40": 0}
+                        protection_total = 0
+                        
+                        # Query receipts for this user in this pay period
+                        cursor.execute('''
+                            SELECT plan_counts, protection_count 
+                            FROM parsed_receipts 
+                            WHERE user_id = (SELECT id FROM users WHERE username = %s)
+                            AND order_date IS NOT NULL
+                        ''', (username,))
+                        
+                        receipt_data = cursor.fetchall()
+                        for receipt in receipt_data:
+                            if receipt[0]:  # plan_counts
+                                try:
+                                    plan_data = json.loads(receipt[0])
+                                    for plan_type, count in plan_data.items():
+                                        if plan_type in plan_counts_total:
+                                            plan_counts_total[plan_type] += count
+                                except:
+                                    pass
+                            
+                            if receipt[1]:  # protection_count
+                                protection_total += receipt[1]
+                        
+                        # Calculate commission
+                        commission_result = calculate_commission(
+                            activations_by_plan=plan_counts_total,
+                            upgrades=data[3],
+                            protection_added=protection_total,
+                            accessories_total=accessories_total,
+                            tier=tier,
+                            total_devices=data[4]
+                        )
+                        
+                        # Add commission data to the row
+                        data.extend([
+                            commission_result['total'],
+                            commission_result['breakdown']['activation'],
+                            commission_result['breakdown']['upgrade'],
+                            commission_result['breakdown']['protection'],
+                            commission_result['breakdown']['accessory'],
+                            commission_result['breakdown']['apo'],
+                            commission_result['breakdown']['accessory_rate']
+                        ])
+                        
                         commission_data.append(data)
                     
                     return render_template('commission.html', 
@@ -2032,10 +2167,57 @@ def commission(period_offset=0):
                     elif total_accessories >= 500:
                         current_tier = 1
                     else:
-                        current_tier = 0
+                        current_tier = 1
                     
                     total_devices = total_activations + total_upgrades
-                    commission_data = [[username, name, total_activations, total_upgrades, total_devices, total_accessories, current_tier]]
+                    
+                    # Get plan counts and protection data from receipts
+                    plan_counts_total = {"60": 0, "55": 0, "30/40": 0}
+                    protection_total = 0
+                    
+                    # Query receipts for this user in this pay period
+                    cursor.execute('''
+                        SELECT plan_counts, protection_count 
+                        FROM parsed_receipts 
+                        WHERE user_id = %s
+                        AND order_date IS NOT NULL
+                    ''', (current_user.id,))
+                    
+                    receipt_data = cursor.fetchall()
+                    for receipt in receipt_data:
+                        if receipt[0]:  # plan_counts
+                            try:
+                                plan_data = json.loads(receipt[0])
+                                for plan_type, count in plan_data.items():
+                                    if plan_type in plan_counts_total:
+                                        plan_counts_total[plan_type] += count
+                            except:
+                                pass
+                        
+                        if receipt[1]:  # protection_count
+                            protection_total += receipt[1]
+                    
+                    # Calculate commission
+                    commission_result = calculate_commission(
+                        activations_by_plan=plan_counts_total,
+                        upgrades=total_upgrades,
+                        protection_added=protection_total,
+                        accessories_total=total_accessories,
+                        tier=current_tier,
+                        total_devices=total_devices
+                    )
+                    
+                    commission_data = [[
+                        username, name, total_activations, total_upgrades, total_devices, 
+                        total_accessories, current_tier,
+                        commission_result['total'],
+                        commission_result['breakdown']['activation'],
+                        commission_result['breakdown']['upgrade'],
+                        commission_result['breakdown']['protection'],
+                        commission_result['breakdown']['accessory'],
+                        commission_result['breakdown']['apo'],
+                        commission_result['breakdown']['accessory_rate']
+                    ]]
                     
                     progress = min((float(total_accessories) / 1750 * 100), 100)
                     
