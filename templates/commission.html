@@ -205,9 +205,16 @@
 
         .pay-period-header h2 {
             margin: 0;
-            color: rgb(67, 177, 43);
-            font-size: 1.3rem;
+            color: rgb(38, 156, 224);
+            font-size: 1.1rem;
             font-weight: 600;
+        }
+
+        .pay-period-date {
+            color: #2d7a1a;
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin: 0.5rem 0;
         }
 
         .current-period-badge {
@@ -371,7 +378,8 @@
             <!-- Pay Period Navigation -->
             <div class="pay-period-container">
                 <div class="pay-period-header">
-                    <h2>Pay Period: {{ period_display }}</h2>
+                    <h2>Pay Period:</h2>
+                    <div class="pay-period-date">{{ period_display }}</div>
                     <h3>{% if is_current_period %}</h3>
                     <span class="current-period-badge">Current Period</span>
                     {% endif %}
