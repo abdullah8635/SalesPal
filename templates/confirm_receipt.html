@@ -459,14 +459,14 @@
                         
                         {% if activation_fee_details and activation_fee_details.individual_fees %}
                         <div class="activation-fee-details">
-                            <h4>Fee Breakdown:</h4>
+                            <h4>Individual Activation Fees:</h4>
                             <div class="fee-breakdown">
                                 {% for fee in activation_fee_details.individual_fees %}
                                 <span class="fee-item">${{ "%.2f"|format(fee) }}</span>
                                 {% endfor %}
                             </div>
                             <div class="average-fee">
-                                Average: ${{ "%.2f"|format(activation_fee_details.average) }}
+                                Total: {{ activation_fee_details.individual_fees|length }} fees | Average: ${{ "%.2f"|format(activation_fee_details.average) }}
                             </div>
                         </div>
                         {% endif %}
