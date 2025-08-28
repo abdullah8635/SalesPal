@@ -75,6 +75,7 @@ def parse_order_date(order_date_str):
         
         formats_to_try = [
             '%d-%b-%Y',    # 28-Aug-2025
+            '%d-%B-%Y',    # 21-august-2025  ← ADD THIS LINE
             '%m-%d-%Y',    # 8-28-2025
             '%Y-%m-%d',    # 2025-08-28
             '%m/%d/%Y',    # 8/28/2025
@@ -87,11 +88,11 @@ def parse_order_date(order_date_str):
             except ValueError:
                 continue
         
-        app.logger.warning(f"Could not parse order date with any format: {order_date_str}")
+        #app.logger.warning(f"Could not parse order date with any format: {order_date_str}")
         return None
         
     except Exception as e:
-        app.logger.warning(f"Error parsing order date '{order_date_str}': {str(e)}")
+        #app.logger.warning(f"Error parsing order date '{order_date_str}': {str(e)}")
         return None
 
 def is_date_in_pay_period(order_date_str, period_start, period_end):
