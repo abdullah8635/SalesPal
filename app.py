@@ -1424,12 +1424,63 @@ def extract_activation_fees(pdf_text):
         app.logger.debug(f"Found activation fee pattern: {qty} x ${base_price}")
     
     # Pattern 2: If no pattern matches found, look for "Activation Fee" sections manually
+    # Based on your PDF, we need to look for lines that just say "Activation Fee" 
+    # followed by a price line like "1 @$25.00 $25.00"
     if not activation_fees:
         lines = pdf_text.split('\n')
         
         for i, line in enumerate(lines):
-            # Look for standalone "Activation Fee" line
-            if 'Activation Fee' in line and '@
+            line = line.strip()
+            
+            # Look for standalone "Activation Fee" line (exactly this text)
+            if line == 'Activation Fee':
+                # Look ahead for the price line in the next few lines
+                for j in range(i+1, min(len(lines), i+5)):
+                    next_line = lines[j].strip()
+                    
+                    # Look for pattern like "1 @$25.00 $25.00"
+                    price_match = re.search(r'(\d+)?\s*@\$(\d+\.?\d*)\s+\$(\d+\.?\d*)', next_line)
+                    if price_match:
+                        qty = int(price_match.group(1)) if price_match.group(1) else 1
+                        base_price = float(price_match.group(2))
+                        
+                        # Use the base price (@$ amount), not the final amount which might include discounts
+                        for _ in range(qty):
+                            activation_fees.append(base_price)
+                        
+                        app.logger.debug(f"Found activation fee (manual): {qty} x ${base_price}")
+                        break
+    
+    # Pattern 3: If still no matches, look for any line containing "Activation Fee" and extract base price
+    if not activation_fees:
+        lines = pdf_text.split('\n')
+        
+        for i, line in enumerate(lines):
+            if 'Activation Fee' in line:
+                # Look in current line and next few lines for @$ pattern
+                search_lines = [line] + lines[i+1:i+5]
+                
+                for search_line in search_lines:
+                    price_match = re.search(r'(\d+)?\s*@\$(\d+\.?\d*)', search_line)
+                    if price_match:
+                        qty = int(price_match.group(1)) if price_match.group(1) else 1
+                        base_price = float(price_match.group(2))
+                        
+                        for _ in range(qty):
+                            activation_fees.append(base_price)
+                        
+                        app.logger.debug(f"Found activation fee (fallback): {qty} x ${base_price}")
+                        break
+    
+    # Remove exact duplicates only
+    seen = set()
+    unique_fees = []
+    for fee in activation_fees:
+        if fee not in seen:
+            seen.add(fee)
+            unique_fees.append(fee)
+    
+    activation_fees = unique_fees
     
     # Calculate stats
     if activation_fees:
@@ -1450,7 +1501,6 @@ def extract_activation_fees(pdf_text):
             'count': 0,
             'average': 0.0
         }
-
 @app.route('/upload', methods=['GET', 'POST'])
 @login_required
 def upload_pdf():
