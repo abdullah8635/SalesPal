@@ -474,8 +474,24 @@ def update_receipt_details(rq_invoice):
                 for frontend_field, value in updates.items():
                     if frontend_field in field_mapping:
                         db_column = field_mapping[frontend_field]
-                        update_columns.append(f'{db_column} = %s')
-                        update_values.append(value)
+                        
+                        # Special handling for ppp_present to convert to boolean
+                        if db_column == 'ppp_present':
+                            # Convert various representations to boolean
+                            if isinstance(value, bool):
+                                boolean_value = value
+                            elif isinstance(value, int):
+                                boolean_value = bool(value)
+                            elif isinstance(value, str):
+                                boolean_value = value.lower() in ('true', '1', 'yes', 'on')
+                            else:
+                                boolean_value = bool(value)
+                            
+                            update_columns.append(f'{db_column} = %s')
+                            update_values.append(boolean_value)
+                        else:
+                            update_columns.append(f'{db_column} = %s')
+                            update_values.append(value)
 
                 if update_columns:
                     update_query = f"""
@@ -1603,7 +1619,7 @@ def upload_pdf():
                         'accessories_prices': accessories_prices,
                         'upgrades_count': upgrades_count,
                         'activations_count': activations_count,
-                        'ppp_present': ppp_present,
+                        'ppp_present': 'ppp_present' in request.form,
                         'activation_fee_sum': activation_fee_sum,
                         'activation_fee_details': activation_fee_details,
                         'imei_iccid_pairs': pairs,
