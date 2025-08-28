@@ -472,55 +472,78 @@ h1 {
             
             editBtn.style.display = 'none';
             actions.style.display = 'block';
-
+        
             fields.forEach(field => {
-        const currentValue = field.textContent.trim();
-        const input = document.createElement('input');
-        input.type = getInputType(field.dataset.field);
-        input.className = 'edit-input';
-        
-        // Store the original value for all fields
-        input.dataset.original = currentValue;
-        
-        // Special handling for date field
-        if (field.dataset.field === 'order_date') {
-            // Try to parse the date into YYYY-MM-DD format for the date input
-            try {
-                const dateParts = currentValue.split('-');
-                if (dateParts.length >= 3) {
-                    // Handle the specific date format from your data (e.g., "28-Aug-2024")
-                    const monthMap = {
-                        'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
-                        'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
-                        'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
-                    };
+                const currentValue = field.textContent.trim();
+                const input = document.createElement('input');
+                input.type = getInputType(field.dataset.field);
+                input.className = 'edit-input';
+                
+                // Special handling for date field
+                if (field.dataset.field === 'order_date') {
+                    // Store the original formatted date
+                    input.dataset.original = currentValue;
                     
-                    const day = dateParts[0].padStart(2, '0');
-                    const monthStr = dateParts[1];
-                    const year = dateParts[2].split(' ')[0]; // Remove time if present
-                    
-                    // Convert month name to number
-                    const month = monthMap[monthStr] || monthStr.padStart(2, '0');
-                    
-                    // Set the date input value in YYYY-MM-DD format
-                    const isoDate = `${year}-${month}-${day}`;
-                    input.value = isoDate;
+                    // Try to parse the date into YYYY-MM-DD format for the date input
+                    try {
+                        const dateParts = currentValue.split('-');
+                        if (dateParts.length >= 3) {
+                            // Handle the specific date format from your data
+                            const month = {
+                                'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
+                                'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
+                                'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
+                            }[dateParts[1]] || dateParts[1];
+                            
+                            // Extract just the date part if there's a time component
+                            const day = dateParts[0].padStart(2, '0');
+                            const year = dateParts[2].split(' ')[0];
+                            
+                            input.value = `${year}-${month}-${day}`;
+                        } else {
+                            input.value = currentValue;
+                        }
+                    } catch (e) {
+                        console.error('Date parsing error:', e);
+                        input.value = currentValue;
+                    }
                 } else {
-                    // If parsing fails, keep original value
-                    input.value = currentValue;
+                    // Handle non-date fields
+                    input.value = currentValue.startsWith('$') ? currentValue.substring(1) : currentValue;
                 }
-            } catch (e) {
-                console.error('Date parsing error:', e);
-                // If anything goes wrong, preserve the original value
-                input.value = currentValue;
+                
+                input.dataset.original = currentValue;
+        
+                // Add validation for specific fields
+                switch(field.dataset.field) {
+                    case 'imei':
+                        input.pattern = '[0-9]{15}';
+                        input.title = 'IMEI must be 15 digits';
+                        break;
+                    case 'iccid':
+                        input.pattern = '[0-9]{19,20}';
+                        input.title = 'ICCID must be 19-20 digits';
+                        break;
+                    case 'total_price':
+                    case 'activation_fee':
+                        input.type = 'number';
+                        input.step = '0.01';
+                        input.min = '0';
+                        break;
+                    case 'upgrades':
+                    case 'activations':
+                        input.type = 'number';
+                        input.min = '0';
+                        break;
+                }
+
+                field.innerHTML = '';
+                field.appendChild(input);
+            });
+        
+            if (sectionId === 'device-info') {
+                document.querySelectorAll('.action-column').forEach(col => col.classList.remove('hidden'));
             }
-        } else if (field.dataset.field === 'ppp_present') {
-            // Handle boolean checkbox
-            input.type = 'checkbox';
-            input.checked = currentValue.toLowerCase() === 'yes';
-        } else {
-            // Handle other fields - remove currency symbols
-            input.value = currentValue.startsWith('$') ? currentValue.substring(1) : currentValue;
         }
 
         function getInputType(field) {
