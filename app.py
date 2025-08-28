@@ -2073,15 +2073,15 @@ def initialize_database():
         app.logger.error(f"Critical error during database initialization: {str(e)}")
         sys.exit(1)
 
-# Call this function when the app starts
-with app.app_context():
-    if init_db():
-        app.logger.info("Database initialized successfully")
-    else:
-        app.logger.error("Failed to initialize database")
-
 if __name__ == '__main__':
     import sys
+    
+    # Initialize database when starting the app
+    with app.app_context():
+        if init_db():
+            app.logger.info("Database initialized successfully")
+        else:
+            app.logger.error("Failed to initialize database")
     
     port = int(os.environ.get('PORT', 5000))
     
