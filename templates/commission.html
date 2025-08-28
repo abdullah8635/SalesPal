@@ -172,11 +172,17 @@
         }
 
         .tier-markers {
-            display: flex;
-            justify-content: space-between;
-            padding: 0 10px;
+            position: relative;
+            height: 20px;
+            margin: 0 10px;
+        }
+        
+        .tier-markers span {
+            position: absolute;
+            transform: translateX(-50%);
             color: #666;
             font-size: 0.9rem;
+            white-space: nowrap;
         }
 
         .tier-info {
@@ -606,11 +612,11 @@
                     <div class="progress-bar" style="width: {{ progress }}%"></div>
                 </div>
                 <div class="tier-markers">
-                    <span>$0</span>
-                    <span>$500</span>
-                    <span>$750</span>
-                    <span>$1000</span>
-                    <span>$1750</span>
+                    <span style="left: 0%">$0</span>
+                    <span style="left: 28.6%">$500</span>
+                    <span style="left: 42.9%">$750</span>
+                    <span style="left: 57.1%">$1000</span>
+                    <span style="left: 100%">$1750</span>
                 </div>
                 <div class="tier-info">
                     Current Tier: {{ current_tier }}
