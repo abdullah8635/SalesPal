@@ -65,6 +65,10 @@ def get_pay_period_by_number(period_number):
     current_period_end = current_period_start + timedelta(days=13)
     return current_period_start, current_period_end
 
+def format_pay_period_display(start_date, end_date):
+    """Format pay period dates for display"""
+    return f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
+    
 def parse_order_date(order_date_str):
     """Parse order date string from various formats to datetime"""
     try:
