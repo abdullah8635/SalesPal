@@ -2032,7 +2032,7 @@ def commission(period_offset=0):
                     elif total_accessories >= 500:
                         current_tier = 1
                     else:
-                        current_tier = 1
+                        current_tier = 0
                     
                     total_devices = total_activations + total_upgrades
                     commission_data = [[username, name, total_activations, total_upgrades, total_devices, total_accessories, current_tier]]
