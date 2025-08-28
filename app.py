@@ -1541,56 +1541,56 @@ def upload_pdf():
         parsed_data_list = []
 
         for file in files:
-    try:
-        if file and allowed_file(file.filename):
-            filename = secure_filename(file.filename)
-            content = file.read()
-            if not content:
-                raise ValueError("Empty file")
+            try:
+                if file and allowed_file(file.filename):
+                    filename = secure_filename(file.filename)
+                    content = file.read()
+                    if not content:
+                        raise ValueError("Empty file")
 
-            reader = PyPDF2.PdfReader(io.BytesIO(content))
-            if not reader.pages:
-                raise ValueError("PDF has no pages")
+                    reader = PyPDF2.PdfReader(io.BytesIO(content))
+                    if not reader.pages:
+                        raise ValueError("PDF has no pages")
 
-            text = ''.join(page.extract_text() or '' for page in reader.pages)
-            if not text.strip():
-                raise ValueError("PDF contains no text")
+                    text = ''.join(page.extract_text() or '' for page in reader.pages)
+                    if not text.strip():
+                        raise ValueError("PDF contains no text")
 
-            parsed = extract_info_from_pdf(io.BytesIO(content))
-            (company_name, customer, order_date, sales_person, rq_invoice,
-             total_price, accessories_prices, upgrades_count, activations_count,
-             ppp_present, pairs, activation_fee_sum) = parsed
+                    parsed = extract_info_from_pdf(io.BytesIO(content))
+                    (company_name, customer, order_date, sales_person, rq_invoice,
+                     total_price, accessories_prices, upgrades_count, activations_count,
+                     ppp_present, pairs, activation_fee_sum) = parsed
 
-            required = [company_name, customer, order_date, sales_person, rq_invoice]
-            if not all(required):
-                raise ValueError("Missing required fields in PDF")
+                    required = [company_name, customer, order_date, sales_person, rq_invoice]
+                    if not all(required):
+                        raise ValueError("Missing required fields in PDF")
 
-            # IMPORTANT: Extract activation fee details again to store in session
-            activation_fee_details = extract_activation_fees(text)
+                    # IMPORTANT: Extract activation fee details again to store in session
+                    activation_fee_details = extract_activation_fees(text)
 
-            parsed_data_list.append({
-                'filename': filename,
-                'company_name': company_name,
-                'customer': customer,
-                'order_date': order_date,
-                'sales_person': sales_person,
-                'rq_invoice': rq_invoice,
-                'total_price': total_price,
-                'accessories_prices': accessories_prices,
-                'upgrades_count': upgrades_count,
-                'activations_count': activations_count,
-                'ppp_present': ppp_present,
-                'activation_fee_sum': activation_fee_sum,
-                'activation_fee_details': activation_fee_details,  # ADD THIS LINE
-                'imei_iccid_pairs': pairs,
-                'pdf_text': text
-            })
+                    parsed_data_list.append({
+                        'filename': filename,
+                        'company_name': company_name,
+                        'customer': customer,
+                        'order_date': order_date,
+                        'sales_person': sales_person,
+                        'rq_invoice': rq_invoice,
+                        'total_price': total_price,
+                        'accessories_prices': accessories_prices,
+                        'upgrades_count': upgrades_count,
+                        'activations_count': activations_count,
+                        'ppp_present': ppp_present,
+                        'activation_fee_sum': activation_fee_sum,
+                        'activation_fee_details': activation_fee_details,
+                        'imei_iccid_pairs': pairs,
+                        'pdf_text': text
+                    })
 
-        else:
-            raise ValueError("Invalid file format")
-    except Exception as e:
-        app.logger.error(f"Error parsing {file.filename}: {str(e)}")
-        errors.append(f"{file.filename}: {str(e)}")
+                else:
+                    raise ValueError("Invalid file format")
+            except Exception as e:
+                app.logger.error(f"Error parsing {file.filename}: {str(e)}")
+                errors.append(f"{file.filename}: {str(e)}")
 
         if not parsed_data_list:
             return jsonify({
