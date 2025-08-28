@@ -763,6 +763,7 @@ def login():
                                     id=user_id,
                                     name=name,
                                     is_admin=is_admin == 1
+                                    username=db_username
                                 )
                                 
                                 login_user(user, remember=False)
