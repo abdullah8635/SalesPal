@@ -31,6 +31,65 @@ from logging.handlers import RotatingFileHandler
 import atexit
 import threading
 
+# Pay period calculation functions
+def get_pay_period_start_date():
+    """Get the reference start date for pay periods (August 18, 2025)"""
+    return datetime(2025, 8, 18)
+
+def get_current_pay_period(reference_date=None):
+    """Get the current pay period start and end dates"""
+    if reference_date is None:
+        reference_date = datetime.now()
+    
+    pay_period_start = get_pay_period_start_date()
+    
+    # Calculate how many pay periods have passed since the start date
+    days_diff = (reference_date - pay_period_start).days
+    
+    if days_diff < 0:
+        # If we're before the start date, return the first pay period
+        period_number = 0
+    else:
+        period_number = days_diff // 14
+    
+    # Calculate the actual start and end dates for this pay period
+    current_period_start = pay_period_start + timedelta(days=period_number * 14)
+    current_period_end = current_period_start + timedelta(days=13)
+    
+    return current_period_start, current_period_end, period_number
+
+def get_pay_period_by_number(period_number):
+    """Get pay period dates for a specific period number"""
+    pay_period_start = get_pay_period_start_date()
+    current_period_start = pay_period_start + timedelta(days=period_number * 14)
+    current_period_end = current_period_start + timedelta(days=13)
+    return current_period_start, current_period_end
+
+def format_pay_period_display(start_date, end_date):
+    """Format pay period dates for display"""
+    return f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
+
+def parse_order_date(order_date_str):
+    """Parse order date string from format like '28-Aug-2024' to datetime"""
+    try:
+        if not order_date_str or order_date_str == 'N/A':
+            return None
+        
+        # Handle format like "28-Aug-2024" or "28-Aug-2024 10:30 AM"
+        date_part = order_date_str.split(' ')[0]  # Take only the date part
+        return datetime.strptime(date_part, '%d-%b-%Y')
+    except ValueError:
+        app.logger.warning(f"Could not parse order date: {order_date_str}")
+        return None
+
+def is_date_in_pay_period(order_date_str, period_start, period_end):
+    """Check if an order date falls within a pay period"""
+    order_date = parse_order_date(order_date_str)
+    if order_date is None:
+        return False
+    
+    return period_start <= order_date <= period_end
+
 app = Flask(__name__)
 login_manager = LoginManager(app)
 login_manager.init_app(app)
@@ -1839,9 +1898,21 @@ def receipt_details(rq_invoice):
         return "Error loading receipt details", 500
 
 @app.route('/commission')
+@app.route('/commission/<int:period_offset>')
 @login_required
-def commission():
+def commission(period_offset=0):
     try:
+        # Calculate the target pay period
+        current_start, current_end, current_period_number = get_current_pay_period()
+        target_period_number = current_period_number + period_offset
+        
+        # Don't allow negative period numbers
+        if target_period_number < 0:
+            target_period_number = 0
+            period_offset = -current_period_number
+        
+        period_start, period_end = get_pay_period_by_number(target_period_number)
+        
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute("SELECT is_admin FROM users WHERE id = %s", (current_user.id,))
@@ -1849,64 +1920,130 @@ def commission():
                 is_admin = user and user[0] == 1
                 
                 if is_admin:
+                    # Get all receipts for filtering
                     cursor.execute('''
                         SELECT 
                             users.username, users.name,
-                            SUM(COALESCE(parsed_receipts.activations_count, 0)) as total_activations,
-                            SUM(COALESCE(parsed_receipts.upgrades_count, 0)) as total_upgrades,
-                            SUM(COALESCE(parsed_receipts.activations_count, 0) + COALESCE(parsed_receipts.upgrades_count, 0)) as total_devices,
-                            COALESCE(SUM(parsed_receipts.total_price), 0) as total_accessories,
-                            CASE 
-                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1750 THEN 4
-                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1000 THEN 3
-                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 750 THEN 2
-                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 500 THEN 1
-                                ELSE 1
-                            END as current_tier
+                            parsed_receipts.activations_count,
+                            parsed_receipts.upgrades_count,
+                            parsed_receipts.total_price,
+                            parsed_receipts.order_date
                         FROM users
                         LEFT JOIN parsed_receipts ON users.id = parsed_receipts.user_id
                         WHERE users.is_admin = 0
-                        GROUP BY users.username, users.name
                     ''')
-                    commission_data = cursor.fetchall()
+                    all_data = cursor.fetchall()
+                    
+                    # Filter and aggregate data for the pay period
+                    user_data = {}
+                    for row in all_data:
+                        username, name, activations, upgrades, total_price, order_date = row
+                        
+                        # Skip if no receipt data
+                        if order_date is None:
+                            if username not in user_data:
+                                user_data[username] = [username, name, 0, 0, 0, 0.0, 1]
+                            continue
+                        
+                        # Check if this receipt is in the current pay period
+                        if is_date_in_pay_period(order_date, period_start, period_end):
+                            if username not in user_data:
+                                user_data[username] = [username, name, 0, 0, 0, 0.0, 1]
+                            
+                            user_data[username][2] += activations or 0  # activations
+                            user_data[username][3] += upgrades or 0     # upgrades
+                            user_data[username][4] += (activations or 0) + (upgrades or 0)  # total devices
+                            user_data[username][5] += total_price or 0.0  # accessories
+                        else:
+                            # Ensure user exists even if no data in this period
+                            if username not in user_data:
+                                user_data[username] = [username, name, 0, 0, 0, 0.0, 1]
+                    
+                    # Calculate tiers
+                    commission_data = []
+                    for username, data in user_data.items():
+                        accessories_total = data[5]
+                        if accessories_total >= 1750:
+                            tier = 4
+                        elif accessories_total >= 1000:
+                            tier = 3
+                        elif accessories_total >= 750:
+                            tier = 2
+                        elif accessories_total >= 500:
+                            tier = 1
+                        else:
+                            tier = 1
+                        data[6] = tier
+                        commission_data.append(data)
                     
                     return render_template('commission.html', 
                                          commission_data=commission_data, 
                                          is_admin=True,
-                                         current_user=current_user.name)
+                                         current_user=current_user.name,
+                                         period_start=period_start,
+                                         period_end=period_end,
+                                         period_display=format_pay_period_display(period_start, period_end),
+                                         period_offset=period_offset,
+                                         is_current_period=(period_offset == 0))
                 else:
+                    # Get all receipts for the current user
                     cursor.execute('''
                         SELECT 
                             users.username, users.name,
-                            SUM(COALESCE(parsed_receipts.activations_count, 0)) as total_activations,
-                            SUM(COALESCE(parsed_receipts.upgrades_count, 0)) as total_upgrades,
-                            SUM(COALESCE(parsed_receipts.activations_count, 0) + COALESCE(parsed_receipts.upgrades_count, 0)) as total_devices,
-                            COALESCE(SUM(parsed_receipts.total_price), 0) as total_accessories,
-                            CASE 
-                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1750 THEN 4
-                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 1000 THEN 3
-                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 750 THEN 2
-                                WHEN COALESCE(SUM(parsed_receipts.total_price), 0) >= 500 THEN 1
-                                ELSE 1
-                            END as current_tier
+                            parsed_receipts.activations_count,
+                            parsed_receipts.upgrades_count,
+                            parsed_receipts.total_price,
+                            parsed_receipts.order_date
                         FROM users
                         LEFT JOIN parsed_receipts ON users.id = parsed_receipts.user_id
                         WHERE users.id = %s
-                        GROUP BY users.username, users.name
                     ''', (current_user.id,))
-                    commission_data = cursor.fetchall()
+                    all_data = cursor.fetchall()
                     
-                    accessories_total = commission_data[0][5] if commission_data else 0
-                    progress = min((float(accessories_total) / 1750 * 100), 100)
-                    current_tier = commission_data[0][6] if commission_data else 1
+                    # Filter and aggregate for the pay period
+                    total_activations = 0
+                    total_upgrades = 0
+                    total_accessories = 0.0
+                    username = current_user.username
+                    name = current_user.name
+                    
+                    for row in all_data:
+                        _, _, activations, upgrades, total_price, order_date = row
+                        
+                        if order_date and is_date_in_pay_period(order_date, period_start, period_end):
+                            total_activations += activations or 0
+                            total_upgrades += upgrades or 0
+                            total_accessories += total_price or 0.0
+                    
+                    # Calculate tier
+                    if total_accessories >= 1750:
+                        current_tier = 4
+                    elif total_accessories >= 1000:
+                        current_tier = 3
+                    elif total_accessories >= 750:
+                        current_tier = 2
+                    elif total_accessories >= 500:
+                        current_tier = 1
+                    else:
+                        current_tier = 1
+                    
+                    total_devices = total_activations + total_upgrades
+                    commission_data = [[username, name, total_activations, total_upgrades, total_devices, total_accessories, current_tier]]
+                    
+                    progress = min((float(total_accessories) / 1750 * 100), 100)
                     
                     return render_template('commission.html', 
                                          commission_data=commission_data, 
                                          is_admin=False,
-                                         accessories_total=accessories_total,
+                                         accessories_total=total_accessories,
                                          current_tier=current_tier,
                                          progress=progress,
-                                         current_user=current_user.name)
+                                         current_user=current_user.name,
+                                         period_start=period_start,
+                                         period_end=period_end,
+                                         period_display=format_pay_period_display(period_start, period_end),
+                                         period_offset=period_offset,
+                                         is_current_period=(period_offset == 0))
     
     except Exception as e:
         app.logger.error(f"Error in commission route: {str(e)}")

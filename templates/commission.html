@@ -186,6 +186,100 @@
             font-size: 1rem;
         }
 
+        /* Pay Period Styles */
+        .pay-period-container {
+            margin-bottom: 2rem;
+            padding: 1.5rem;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            border: 1px solid #dee2e6;
+        }
+
+        .pay-period-header {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .pay-period-header h2 {
+            margin: 0;
+            color: rgb(67, 177, 43);
+            font-size: 1.3rem;
+            font-weight: 600;
+        }
+
+        .current-period-badge {
+            background: linear-gradient(135deg, rgb(67, 177, 43) 0%, #43B02A 100%);
+            color: white;
+            padding: 0.3rem 0.8rem;
+            border-radius: 20px;
+            font-size: 0.75rem;
+            font-weight: bold;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
+            box-shadow: 0 2px 4px rgba(67, 177, 43, 0.3);
+        }
+
+        .pay-period-nav {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            gap: 1.5rem;
+        }
+
+        .nav-arrow {
+            padding: 0.6rem 1.2rem;
+            background: rgb(38, 156, 224);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+        }
+
+        .nav-arrow:hover {
+            background: rgb(0, 62, 127);
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(38, 156, 224, 0.3);
+        }
+
+        .current-period-btn {
+            padding: 0.6rem 1.2rem;
+            background: rgb(67, 177, 43);
+            color: white;
+            text-decoration: none;
+            border-radius: 8px;
+            font-weight: 500;
+            transition: all 0.3s ease;
+            border: 2px solid transparent;
+        }
+
+        .current-period-btn:hover {
+            background: #2d7a1a;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(67, 177, 43, 0.3);
+        }
+
+        @media (max-width: 768px) {
+            .pay-period-header {
+                flex-direction: column;
+                gap: 0.5rem;
+            }
+
+            .pay-period-nav {
+                flex-direction: column;
+                gap: 0.8rem;
+            }
+
+            .nav-arrow, .current-period-btn {
+                width: 100%;
+                text-align: center;
+            }
+        }
+
         .button-container {
             display: flex;
             justify-content: flex-end;
@@ -273,6 +367,23 @@
     <main class="main-content">
         <div class="commission-container">
             <h1>{% if is_admin %}Team Performance{% else %}My Commission{% endif %}</h1>
+            
+            <!-- Pay Period Navigation -->
+            <div class="pay-period-container">
+                <div class="pay-period-header">
+                    <h2>Pay Period: {{ period_display }}</h2>
+                    {% if is_current_period %}
+                    <span class="current-period-badge">Current Period</span>
+                    {% endif %}
+                </div>
+                <div class="pay-period-nav">
+                    <a href="{{ url_for('commission', period_offset=period_offset-1) }}" class="nav-arrow">← Previous</a>
+                    {% if period_offset != 0 %}
+                    <a href="{{ url_for('commission') }}" class="current-period-btn">Current Period</a>
+                    {% endif %}
+                    <a href="{{ url_for('commission', period_offset=period_offset+1) }}" class="nav-arrow">Next →</a>
+                </div>
+            </div>
             
             <div class="table-container">
                 <table>
