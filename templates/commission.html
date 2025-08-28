@@ -578,7 +578,6 @@
                         <th>Protection</th>
                         <th>Accessory</th>
                         <th>APO</th>
-                        <th>Accessory Rate</th>
                     </tr>
                     {% for row in commission_data %}
                     <tr>
@@ -595,7 +594,6 @@
                         <td>${{ "%.2f"|format(row[10]) }}</td>
                         <td>${{ "%.2f"|format(row[11]) }}</td>
                         <td>${{ "%.2f"|format(row[12]) }}</td>
-                        <td>{{ "%.1f"|format(row[13]) }}%</td>
                     </tr>
                     {% endfor %}
                 </table>
