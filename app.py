@@ -65,21 +65,33 @@ def get_pay_period_by_number(period_number):
     current_period_end = current_period_start + timedelta(days=13)
     return current_period_start, current_period_end
 
-def format_pay_period_display(start_date, end_date):
-    """Format pay period dates for display"""
-    return f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
-
 def parse_order_date(order_date_str):
-    """Parse order date string from format like '28-Aug-2024' to datetime"""
+    """Parse order date string from various formats to datetime"""
     try:
         if not order_date_str or order_date_str == 'N/A':
             return None
         
-        # Handle format like "28-Aug-2024" or "28-Aug-2024 10:30 AM"
-        date_part = order_date_str.split(' ')[0]  # Take only the date part
-        return datetime.strptime(date_part, '%d-%b-%Y')
-    except ValueError:
-        app.logger.warning(f"Could not parse order date: {order_date_str}")
+        date_part = order_date_str.split(' ')[0]
+        
+        formats_to_try = [
+            '%d-%b-%Y',    # 28-Aug-2025
+            '%m-%d-%Y',    # 8-28-2025
+            '%Y-%m-%d',    # 2025-08-28
+            '%m/%d/%Y',    # 8/28/2025
+            '%d/%m/%Y',    # 28/8/2025
+        ]
+        
+        for fmt in formats_to_try:
+            try:
+                return datetime.strptime(date_part, fmt)
+            except ValueError:
+                continue
+        
+        app.logger.warning(f"Could not parse order date with any format: {order_date_str}")
+        return None
+        
+    except Exception as e:
+        app.logger.warning(f"Error parsing order date '{order_date_str}': {str(e)}")
         return None
 
 def is_date_in_pay_period(order_date_str, period_start, period_end):
