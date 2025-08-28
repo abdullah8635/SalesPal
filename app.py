@@ -1920,6 +1920,15 @@ def commission(period_offset=0):
                 is_admin = user and user[0] == 1
                 
                 if is_admin:
+                    # First get all non-admin users to ensure they all appear in the results
+                    cursor.execute('SELECT username, name FROM users WHERE is_admin = 0')
+                    all_users = cursor.fetchall()
+                    
+                    # Initialize user data for all users
+                    user_data = {}
+                    for username, name in all_users:
+                        user_data[username] = [username, name, 0, 0, 0, 0.0, 1]
+                    
                     # Get all receipts for filtering
                     cursor.execute('''
                         SELECT 
@@ -1930,34 +1939,20 @@ def commission(period_offset=0):
                             parsed_receipts.order_date
                         FROM users
                         LEFT JOIN parsed_receipts ON users.id = parsed_receipts.user_id
-                        WHERE users.is_admin = 0
+                        WHERE users.is_admin = 0 AND parsed_receipts.order_date IS NOT NULL
                     ''')
                     all_data = cursor.fetchall()
                     
                     # Filter and aggregate data for the pay period
-                    user_data = {}
                     for row in all_data:
                         username, name, activations, upgrades, total_price, order_date = row
                         
-                        # Skip if no receipt data
-                        if order_date is None:
-                            if username not in user_data:
-                                user_data[username] = [username, name, 0, 0, 0, 0.0, 1]
-                            continue
-                        
                         # Check if this receipt is in the current pay period
                         if is_date_in_pay_period(order_date, period_start, period_end):
-                            if username not in user_data:
-                                user_data[username] = [username, name, 0, 0, 0, 0.0, 1]
-                            
                             user_data[username][2] += activations or 0  # activations
                             user_data[username][3] += upgrades or 0     # upgrades
                             user_data[username][4] += (activations or 0) + (upgrades or 0)  # total devices
                             user_data[username][5] += total_price or 0.0  # accessories
-                        else:
-                            # Ensure user exists even if no data in this period
-                            if username not in user_data:
-                                user_data[username] = [username, name, 0, 0, 0, 0.0, 1]
                     
                     # Calculate tiers
                     commission_data = []
