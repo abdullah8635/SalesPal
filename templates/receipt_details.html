@@ -288,6 +288,10 @@ h1 {
             transform: scale(1.05);
         }
 
+.hidden {
+    display: none;
+}
+
 @media (max-width: 768px) {
     body {
         padding-top: 60px;
@@ -370,8 +374,8 @@ h1 {
         <div class="content-grid">
             <div class="receipt-details">
                 <div class="actions">
-                    <button class="save-btn" onclick="handleSave('receipt-details')">Save</button>
-                    <button class="cancel-btn" onclick="handleCancel('receipt-details')">Cancel</button>
+                    <button class="save-btn" onclick="handleSave('receipt-details')" style="display: none;">Save</button>
+                    <button class="cancel-btn" onclick="handleCancel('receipt-details')" style="display: none;">Cancel</button>
                     <button class="edit-btn" onclick="handleEdit('receipt-details')">Edit</button>
                 </div>
                 <div class="field">
@@ -449,8 +453,8 @@ h1 {
                     </tbody>
                 </table>
                 <div class="actions">
-                    <button class="save-btn" onclick="handleSave('device-info')">Save</button>
-                    <button class="cancel-btn" onclick="handleCancel('device-info')">Cancel</button>
+                    <button class="save-btn" onclick="handleSave('device-info')" style="display: none;">Save</button>
+                    <button class="cancel-btn" onclick="handleCancel('device-info')" style="display: none;">Cancel</button>
                     <button class="edit-btn" onclick="handleEdit('device-info')">Edit</button>
                 </div>
                 <div class="success-message"></div>
@@ -458,20 +462,24 @@ h1 {
             </div>
         </div>
     
-            <div class="link-bar">
-                <a href="{{ url_for('upload_pdf') }}">Upload Receipt</a>            
+        <div class="link-bar">
+            <a href="{{ url_for('upload_pdf') }}">Upload Receipt</a>            
             <a href="{{ url_for('view_receipts') }}">View Stored Receipts</a>
-
-</div>
+        </div>
+    </div>
+    
     <script>
         function handleEdit(sectionId) {
             const section = document.getElementById(sectionId) || document.querySelector(`.${sectionId}`);
             const editBtn = section.querySelector('.edit-btn');
+            const saveBtn = section.querySelector('.save-btn');
+            const cancelBtn = section.querySelector('.cancel-btn');
             const fields = section.querySelectorAll('.field-value');
-            const actions = section.querySelector('.actions');
             
+            // Show save/cancel buttons, hide edit button
             editBtn.style.display = 'none';
-            actions.style.display = 'block';
+            saveBtn.style.display = 'inline-block';
+            cancelBtn.style.display = 'inline-block';
         
             fields.forEach(field => {
                 const currentValue = field.textContent.trim();
@@ -479,40 +487,49 @@ h1 {
                 input.type = getInputType(field.dataset.field);
                 input.className = 'edit-input';
                 
-                // Special handling for date field
+                // Store the original value for ALL fields
+                input.dataset.original = currentValue;
+                
+                // Special handling for different field types
                 if (field.dataset.field === 'order_date') {
-                    // Store the original formatted date
-                    input.dataset.original = currentValue;
-                    
                     // Try to parse the date into YYYY-MM-DD format for the date input
                     try {
                         const dateParts = currentValue.split('-');
                         if (dateParts.length >= 3) {
-                            // Handle the specific date format from your data
-                            const month = {
+                            // Handle the specific date format from your data (e.g., "28-Aug-2024")
+                            const monthMap = {
                                 'Jan': '01', 'Feb': '02', 'Mar': '03', 'Apr': '04',
                                 'May': '05', 'Jun': '06', 'Jul': '07', 'Aug': '08',
                                 'Sep': '09', 'Oct': '10', 'Nov': '11', 'Dec': '12'
-                            }[dateParts[1]] || dateParts[1];
+                            };
                             
-                            // Extract just the date part if there's a time component
                             const day = dateParts[0].padStart(2, '0');
-                            const year = dateParts[2].split(' ')[0];
+                            const monthStr = dateParts[1];
+                            const year = dateParts[2].split(' ')[0]; // Remove time if present
                             
-                            input.value = `${year}-${month}-${day}`;
+                            // Convert month name to number
+                            const month = monthMap[monthStr] || monthStr.padStart(2, '0');
+                            
+                            // Set the date input value in YYYY-MM-DD format
+                            const isoDate = `${year}-${month}-${day}`;
+                            input.value = isoDate;
                         } else {
-                            input.value = currentValue;
+                            // If parsing fails, use empty value (date input will show placeholder)
+                            input.value = '';
                         }
                     } catch (e) {
                         console.error('Date parsing error:', e);
-                        input.value = currentValue;
+                        // If anything goes wrong, use empty value
+                        input.value = '';
                     }
+                } else if (field.dataset.field === 'ppp_present') {
+                    // Handle boolean checkbox
+                    input.type = 'checkbox';
+                    input.checked = currentValue.toLowerCase() === 'yes';
                 } else {
-                    // Handle non-date fields
+                    // Handle other fields - remove currency symbols
                     input.value = currentValue.startsWith('$') ? currentValue.substring(1) : currentValue;
                 }
-                
-                input.dataset.original = currentValue;
         
                 // Add validation for specific fields
                 switch(field.dataset.field) {
@@ -597,20 +614,21 @@ h1 {
                     updates.device_info = devices;
                 }
             } else {
-                // In your handleSave function, find this part:
                 section.querySelectorAll('.field-value').forEach(field => {
                     const input = field.querySelector('input');
                     if (input) {
                         let value = input.value;
+                        
                         // Special handling for different field types
                         switch(field.dataset.field) {
                             case 'order_date':
-                                // Only update if user actually changed the date
+                                // Only update the date if the user actually changed it
+                                // Compare against empty string since we clear the input for dates
                                 if (input.value !== '' && input.value !== input.dataset.original) {
                                     value = input.value;
                                 } else {
-                                    // Skip updating the date if it wasn't changed
-                                    return; // This skips adding it to updates
+                                    // Don't add to updates if date wasn't changed
+                                    return;
                                 }
                                 break;
                             case 'ppp_present':
@@ -618,16 +636,17 @@ h1 {
                                 break;
                             case 'total_price':
                             case 'activation_fee':
-                                value = parseFloat(value).toFixed(2);
+                                value = parseFloat(value || 0).toFixed(2);
                                 break;
                             case 'upgrades':
                             case 'activations':
-                                value = parseInt(value);
+                                value = parseInt(value || 0);
                                 break;
                         }
                         updates[field.dataset.field] = value;
                     }
                 });
+            }
 
             fetch(`/api/update_receipt/${rqInvoice}`, {
                 method: 'POST',
@@ -644,16 +663,16 @@ h1 {
                 return response.json();
             })
             .then(data => {
-            updateDisplay(section, updates);
-            showSuccess(section, 'Changes saved successfully');
-        })
-        .catch(error => {
-            console.error('Error:', error);  // Debug log
-            showError(section, error.error || 'Failed to save changes');
-        });
-    }
+                updateDisplay(section, updates);
+                showSuccess(section, 'Changes saved successfully');
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                showError(section, error.error || 'Failed to save changes');
+            });
+        }
 
-    function updateDisplay(section, updates) {
+        function updateDisplay(section, updates) {
             if (updates.device_info) {
                 const tbody = document.getElementById('device-pairs');
                 tbody.innerHTML = '';
@@ -672,17 +691,35 @@ h1 {
                 section.querySelectorAll('.field-value').forEach(field => {
                     const input = field.querySelector('input');
                     if (input) {
-                        let displayValue = input.value;
+                        let displayValue;
                         
-                        // Formatting for different field types
-                        switch(field.dataset.field) {
-                            case 'total_price':
-                            case 'activation_fee':
-                                displayValue = '$' + parseFloat(displayValue).toFixed(2);
-                                break;
-                            case 'ppp_present':
-                                displayValue = input.checked ? 'Yes' : 'No';
-                                break;
+                        if (field.dataset.field === 'order_date') {
+                            // For dates, if no new value was provided, keep original
+                            if (input.value === '') {
+                                displayValue = input.dataset.original;
+                            } else {
+                                // Format the new date value back to display format
+                                try {
+                                    const date = new Date(input.value);
+                                    if (!isNaN(date.getTime())) {
+                                        const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
+                                                     'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+                                        displayValue = `${date.getDate()}-${months[date.getMonth()]}-${date.getFullYear()}`;
+                                    } else {
+                                        displayValue = input.dataset.original;
+                                    }
+                                } catch (e) {
+                                    displayValue = input.dataset.original;
+                                }
+                            }
+                        } else if (field.dataset.field === 'ppp_present') {
+                            displayValue = input.checked ? 'Yes' : 'No';
+                        } else {
+                            displayValue = input.value;
+                            // Format currency fields
+                            if (field.dataset.field.includes('price') || field.dataset.field.includes('fee')) {
+                                displayValue = '$' + parseFloat(displayValue || 0).toFixed(2);
+                            }
                         }
                         
                         field.textContent = displayValue;
@@ -690,10 +727,14 @@ h1 {
                 });
             }
 
+            // Hide save/cancel buttons, show edit button
             const editBtn = section.querySelector('.edit-btn');
-            const actions = section.querySelector('.actions');
-            editBtn.style.display = 'block';
-            actions.style.display = 'none';
+            const saveBtn = section.querySelector('.save-btn');
+            const cancelBtn = section.querySelector('.cancel-btn');
+            
+            editBtn.style.display = 'inline-block';
+            saveBtn.style.display = 'none';
+            cancelBtn.style.display = 'none';
 
             if (section.id === 'device-info') {
                 document.querySelectorAll('.action-column').forEach(col => col.classList.add('hidden'));
@@ -701,31 +742,35 @@ h1 {
         }
 
         function handleCancel(sectionId) {
-    const section = document.getElementById(sectionId) || document.querySelector(`.${sectionId}`);
-    const editBtn = section.querySelector('.edit-btn');
-    const fields = section.querySelectorAll('.field-value');
-    const actions = section.querySelector('.actions');
+            const section = document.getElementById(sectionId) || document.querySelector(`.${sectionId}`);
+            const editBtn = section.querySelector('.edit-btn');
+            const saveBtn = section.querySelector('.save-btn');
+            const cancelBtn = section.querySelector('.cancel-btn');
+            const fields = section.querySelectorAll('.field-value');
 
-    editBtn.style.display = 'block';
-    actions.style.display = 'none';
+            // Show edit button, hide save/cancel buttons
+            editBtn.style.display = 'inline-block';
+            saveBtn.style.display = 'none';
+            cancelBtn.style.display = 'none';
 
-    fields.forEach(field => {
-        const input = field.querySelector('input');
-        if (input) {
-            // Use the original value stored in the dataset
-            field.textContent = input.dataset.original;
+            fields.forEach(field => {
+                const input = field.querySelector('input');
+                if (input) {
+                    // Always restore the original value
+                    field.textContent = input.dataset.original;
+                }
+            });
+
+            if (sectionId === 'device-info') {
+                document.querySelectorAll('.action-column').forEach(col => col.classList.add('hidden'));
+            }
         }
-    });
-
-    if (sectionId === 'device-info') {
-        document.querySelectorAll('.action-column').forEach(col => col.classList.add('hidden'));
-    }
-}
 
         function addDevice() {
             const tbody = document.getElementById('device-pairs');
             const tr = document.createElement('tr');
-            tr.innerHTML = `<td class="field-value" data-field="imei">
+            tr.innerHTML = `
+                <td class="field-value" data-field="imei">
                     <input type="text" class="edit-input" pattern="[0-9]{15}" title="IMEI must be 15 digits" placeholder="Enter 15-digit IMEI">
                 </td>
                 <td class="field-value" data-field="iccid">
@@ -742,65 +787,6 @@ h1 {
             const row = button.closest('tr');
             row.remove();
         }
-
-        function updateDisplay(section, updates) {
-    if (updates.device_info) {
-        const tbody = document.getElementById('device-pairs');
-        tbody.innerHTML = '';
-        updates.device_info.forEach(device => {
-            const tr = document.createElement('tr');
-            tr.innerHTML = `
-                <td class="field-value" data-field="imei">${device.imei}</td>
-                <td class="field-value" data-field="iccid">${device.iccid}</td>
-                <td class="action-column hidden">
-                    <button class="remove-btn" onclick="removeDevice(this)">Remove</button>
-                </td>
-            `;
-            tbody.appendChild(tr);
-        });
-    } else {
-        section.querySelectorAll('.field-value').forEach(field => {
-            const input = field.querySelector('input');
-            if (input) {
-                let displayValue;
-                
-                if (field.dataset.field === 'order_date') {
-                    // If the date wasn't changed, use the original value
-                    if (input.value === '') {
-                        displayValue = input.dataset.original;
-                    } else {
-                        // Format the new date value
-                        try {
-                            const date = new Date(input.value);
-                            const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 
-                                         'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
-                            displayValue = `${date.getDate()}-${months[date.getMonth()]}-${date.getFullYear()}`;
-                        } catch (e) {
-                            displayValue = input.dataset.original;
-                        }
-                    }
-                } else {
-                    displayValue = input.value;
-                    // Format currency fields
-                    if (field.dataset.field.includes('price') || field.dataset.field.includes('fee')) {
-                        displayValue = '$' + parseFloat(displayValue).toFixed(2);
-                    }
-                }
-                
-                field.textContent = displayValue;
-            }
-        });
-    }
-
-    const editBtn = section.querySelector('.edit-btn');
-    const actions = section.querySelector('.actions');
-    editBtn.style.display = 'block';
-    actions.style.display = 'none';
-
-    if (section.id === 'device-info') {
-        document.querySelectorAll('.action-column').forEach(col => col.classList.add('hidden'));
-    }
-}
 
         function showSuccess(section, message) {
             const successDiv = section.querySelector('.success-message');
