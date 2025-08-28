@@ -425,6 +425,8 @@ def init_db():
                         user_id INTEGER,
                         date_submitted TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         imei_iccid_pairs TEXT,
+                        plan_counts TEXT,
+                        protection_count INTEGER,
                         FOREIGN KEY(user_id) REFERENCES users(id)
                     );
                 ''')
@@ -1511,6 +1513,13 @@ def extract_info_from_pdf(file_stream):
             total_price = 0.0
             accessory_prices_list = []
 
+        plan_counts = detect_plan_type(pdf_text)
+        app.logger.debug(f"Detected plan counts: {plan_counts}")
+        
+        # Detect protection (CP)
+        protection_count = pdf_text.upper().count("PRTLW")
+        app.logger.debug(f"Detected protection count: {protection_count}")
+
         # Validation
         required_fields = [company_name, customer, order_date, sales_person, rq_invoice]
         missing_fields = []
@@ -1542,7 +1551,9 @@ def extract_info_from_pdf(file_stream):
             activations_count,
             ppp_present,
             pairs,
-            activation_fee_sum
+            activation_fee_sum,
+            plan_counts,
+            protection_count
         ]
 
     except Exception as e:
@@ -1754,7 +1765,7 @@ def upload_pdf():
                     parsed = extract_info_from_pdf(io.BytesIO(content))
                     (company_name, customer, order_date, sales_person, rq_invoice,
                      total_price, accessories_prices, upgrades_count, activations_count,
-                     ppp_present, pairs, activation_fee_sum) = parsed
+                     ppp_present, pairs, activation_fee_sum, plan_counts, protection_count) = parsed
 
                     required = [company_name, customer, order_date, sales_person, rq_invoice]
                     if not all(required):
@@ -1778,7 +1789,9 @@ def upload_pdf():
                         'activation_fee_sum': activation_fee_sum,
                         'activation_fee_details': activation_fee_details,
                         'imei_iccid_pairs': pairs,
-                        'pdf_text': text
+                        'pdf_text': text,
+                        'plan_counts': plan_counts,
+                        'protection_count': protection_count
                     })
 
                 else:
@@ -1843,7 +1856,9 @@ def confirm_receipt():
                 'upgrades_count': int(request.form.get('upgrades_count', 0)),
                 'activations_count': int(request.form.get('activations_count', 0)),
                 'ppp_present': 'ppp_present' in request.form,
-                'activation_fee_sum': float(request.form.get('activation_fee_sum', 0))
+                'activation_fee_sum': float(request.form.get('activation_fee_sum', 0)),
+                'plan_counts': current_pdf.get('plan_counts', {}),
+                'protection_count': current_pdf.get('protection_count', 0)
             }
 
             imei_iccid_pairs = current_pdf.get('imei_iccid_pairs', [])
@@ -1852,19 +1867,21 @@ def confirm_receipt():
             try:
                 with get_db_connection() as conn:
                     with conn.cursor() as cursor:
-                        cursor.execute('''
-                            INSERT INTO parsed_receipts (
-                                company_name, customer, order_date, sales_person, rq_invoice,
-                                total_price, accessory_prices, upgrades_count, activations_count,
-                                ppp_present, activation_fee_sum, user_id, imei_iccid_pairs
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ''', (
-                            form_data['company_name'], form_data['customer'], form_data['order_date'],
-                            form_data['sales_person'], form_data['rq_invoice'], form_data['total_price'],
-                            form_data['accessories_prices'], form_data['upgrades_count'],
-                            form_data['activations_count'], form_data['ppp_present'],
-                            form_data['activation_fee_sum'], current_user.id, imei_iccid_json
-                        ))
+                                                 cursor.execute('''
+                             INSERT INTO parsed_receipts (
+                                 company_name, customer, order_date, sales_person, rq_invoice,
+                                 total_price, accessory_prices, upgrades_count, activations_count,
+                                 ppp_present, activation_fee_sum, user_id, imei_iccid_pairs,
+                                 plan_counts, protection_count
+                             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         ''', (
+                             form_data['company_name'], form_data['customer'], form_data['order_date'],
+                             form_data['sales_person'], form_data['rq_invoice'], form_data['total_price'],
+                             form_data['accessories_prices'], form_data['upgrades_count'],
+                             form_data['activations_count'], form_data['ppp_present'],
+                             form_data['activation_fee_sum'], current_user.id, imei_iccid_json,
+                             json.dumps(form_data['plan_counts']), form_data['protection_count']
+                         ))
                     conn.commit()
                     app.logger.info(f"Inserted data for {form_data['company_name']} by {logged_in_user}")
             except Exception as e:
@@ -1902,6 +1919,7 @@ def confirm_receipt():
     except Exception as e:
         app.logger.error(f"Unexpected error in confirm_receipt: {str(e)}")
         return jsonify({'error': 'Unexpected error occurred'}), 500
+
 
 @app.route('/view_receipts')
 @login_required
