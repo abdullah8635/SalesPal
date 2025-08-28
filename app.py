@@ -242,14 +242,6 @@ def check_db_health():
         app.logger.error(f"Database health check failed: {str(e)}")
         return False
 
-# Initialize database pool on app startup
-with app.app_context():
-    try:
-        initialize_db_pool()
-    except Exception as e:
-        app.logger.error(f"Failed to initialize database pool on startup: {str(e)}")
-        sys.exit(1)
-
 bcrypt = Bcrypt(app)
 limiter = Limiter(
     app=app,
@@ -2076,12 +2068,22 @@ def initialize_database():
 if __name__ == '__main__':
     import sys
     
-    # Initialize database when starting the app
+    # Initialize database and database pool when starting the app
     with app.app_context():
-        if init_db():
-            app.logger.info("Database initialized successfully")
-        else:
-            app.logger.error("Failed to initialize database")
+        try:
+            # Initialize database pool first
+            initialize_db_pool()
+            app.logger.info("Database pool initialized successfully")
+            
+            # Then initialize database tables
+            if init_db():
+                app.logger.info("Database initialized successfully")
+            else:
+                app.logger.error("Failed to initialize database")
+                
+        except Exception as e:
+            app.logger.error(f"Failed to initialize database components: {str(e)}")
+            sys.exit(1)
     
     port = int(os.environ.get('PORT', 5000))
     
