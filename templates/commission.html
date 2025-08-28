@@ -360,19 +360,19 @@
             <img src="/static/logo.png" alt="Smart Touch Wireless" class="logo">
         </div>
         <div class="nav-items">
-            <div class="nav-item">Welcome, {{ current_user }}</div>
+            <div class="nav-item">Hello, {{ current_user }}</div>
         </div>
     </nav>
 
     <main class="main-content">
         <div class="commission-container">
-            <h1>{% if is_admin %}Team Performance{% else %}My Commission{% endif %}</h1>
+            <h1>{% if is_admin %}Team Performance{% else %}{% endif %}</h1>
             
             <!-- Pay Period Navigation -->
             <div class="pay-period-container">
                 <div class="pay-period-header">
                     <h2>Pay Period: {{ period_display }}</h2>
-                    {% if is_current_period %}
+                    <h1>{% if is_current_period %}</h1>
                     <span class="current-period-badge">Current Period</span>
                     {% endif %}
                 </div>
