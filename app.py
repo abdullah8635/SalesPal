@@ -1487,15 +1487,8 @@ def extract_activation_fees(pdf_text):
                         app.logger.debug(f"Found activation fee (fallback): {qty} x ${base_price}")
                         break
     
-    # Remove exact duplicates only
-    seen = set()
-    unique_fees = []
-    for fee in activation_fees:
-        if fee not in seen:
-            seen.add(fee)
-            unique_fees.append(fee)
-    
-    activation_fees = unique_fees
+    # Don't remove duplicates - keep all activation fees as found
+    # This will show all individual fees, including multiple $25.00 fees
     
     # Calculate stats
     if activation_fees:
@@ -1516,6 +1509,7 @@ def extract_activation_fees(pdf_text):
             'count': 0,
             'average': 0.0
         }
+      
 @app.route('/upload', methods=['GET', 'POST'])
 @login_required
 def upload_pdf():
