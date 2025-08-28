@@ -361,34 +361,76 @@
 
         .confetti {
             position: fixed;
-            width: 10px;
-            height: 10px;
+            width: 12px;
+            height: 12px;
             background-color: #f0f;
-            animation: confetti-fall 3s linear infinite;
+            animation: confetti-fall 4s linear infinite;
             z-index: 9999;
+            border-radius: 2px;
+        }
+
+        .confetti.square {
+            border-radius: 0;
+        }
+
+        .confetti.circle {
+            border-radius: 50%;
+        }
+
+        .confetti.triangle {
+            width: 0;
+            height: 0;
+            background-color: transparent;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-bottom: 12px solid;
         }
 
         @keyframes confetti-fall {
             0% {
-                transform: translateY(-100vh) rotate(0deg);
+                transform: translateY(-100vh) rotate(0deg) scale(1);
+                opacity: 1;
+            }
+            50% {
                 opacity: 1;
             }
             100% {
-                transform: translateY(100vh) rotate(720deg);
+                transform: translateY(100vh) rotate(1440deg) scale(0.5);
                 opacity: 0;
             }
         }
 
-        .confetti:nth-child(1) { background-color: #ff0000; left: 10%; animation-delay: 0s; }
-        .confetti:nth-child(2) { background-color: #00ff00; left: 20%; animation-delay: 0.2s; }
-        .confetti:nth-child(3) { background-color: #0000ff; left: 30%; animation-delay: 0.4s; }
-        .confetti:nth-child(4) { background-color: #ffff00; left: 40%; animation-delay: 0.6s; }
-        .confetti:nth-child(5) { background-color: #ff00ff; left: 50%; animation-delay: 0.8s; }
-        .confetti:nth-child(6) { background-color: #00ffff; left: 60%; animation-delay: 1s; }
-        .confetti:nth-child(7) { background-color: #ff8800; left: 70%; animation-delay: 1.2s; }
-        .confetti:nth-child(8) { background-color: #8800ff; left: 80%; animation-delay: 1.4s; }
-        .confetti:nth-child(9) { background-color: #ff0088; left: 90%; animation-delay: 1.6s; }
-        .confetti:nth-child(10) { background-color: #88ff00; left: 95%; animation-delay: 1.8s; }
+        /* More confetti pieces with different shapes and colors */
+        .confetti:nth-child(1) { background-color: #ff0000; left: 5%; animation-delay: 0s; }
+        .confetti:nth-child(2) { background-color: #00ff00; left: 10%; animation-delay: 0.1s; }
+        .confetti:nth-child(3) { background-color: #0000ff; left: 15%; animation-delay: 0.2s; }
+        .confetti:nth-child(4) { background-color: #ffff00; left: 20%; animation-delay: 0.3s; }
+        .confetti:nth-child(5) { background-color: #ff00ff; left: 25%; animation-delay: 0.4s; }
+        .confetti:nth-child(6) { background-color: #00ffff; left: 30%; animation-delay: 0.5s; }
+        .confetti:nth-child(7) { background-color: #ff8800; left: 35%; animation-delay: 0.6s; }
+        .confetti:nth-child(8) { background-color: #8800ff; left: 40%; animation-delay: 0.7s; }
+        .confetti:nth-child(9) { background-color: #ff0088; left: 45%; animation-delay: 0.8s; }
+        .confetti:nth-child(10) { background-color: #88ff00; left: 50%; animation-delay: 0.9s; }
+        .confetti:nth-child(11) { background-color: #ff4444; left: 55%; animation-delay: 1.0s; }
+        .confetti:nth-child(12) { background-color: #44ff44; left: 60%; animation-delay: 1.1s; }
+        .confetti:nth-child(13) { background-color: #4444ff; left: 65%; animation-delay: 1.2s; }
+        .confetti:nth-child(14) { background-color: #ffff44; left: 70%; animation-delay: 1.3s; }
+        .confetti:nth-child(15) { background-color: #ff44ff; left: 75%; animation-delay: 1.4s; }
+        .confetti:nth-child(16) { background-color: #44ffff; left: 80%; animation-delay: 1.5s; }
+        .confetti:nth-child(17) { background-color: #ff8844; left: 85%; animation-delay: 1.6s; }
+        .confetti:nth-child(18) { background-color: #8844ff; left: 90%; animation-delay: 1.7s; }
+        .confetti:nth-child(19) { background-color: #ff4488; left: 95%; animation-delay: 1.8s; }
+        .confetti:nth-child(20) { background-color: #88ff44; left: 98%; animation-delay: 1.9s; }
+        .confetti:nth-child(21) { background-color: #ffaa00; left: 3%; animation-delay: 2.0s; }
+        .confetti:nth-child(22) { background-color: #aa00ff; left: 8%; animation-delay: 2.1s; }
+        .confetti:nth-child(23) { background-color: #00ffaa; left: 13%; animation-delay: 2.2s; }
+        .confetti:nth-child(24) { background-color: #ff00aa; left: 18%; animation-delay: 2.3s; }
+        .confetti:nth-child(25) { background-color: #00aaff; left: 23%; animation-delay: 2.4s; }
+        .confetti:nth-child(26) { background-color: #aaff00; left: 28%; animation-delay: 2.5s; }
+        .confetti:nth-child(27) { background-color: #ffaa44; left: 33%; animation-delay: 2.6s; }
+        .confetti:nth-child(28) { background-color: #aa44ff; left: 38%; animation-delay: 2.7s; }
+        .confetti:nth-child(29) { background-color: #44ffaa; left: 43%; animation-delay: 2.8s; }
+        .confetti:nth-child(30) { background-color: #ff44aa; left: 48%; animation-delay: 2.9s; }
         
     </style>
 </head>
@@ -490,16 +532,22 @@
             const container = document.getElementById('confetti-container');
             container.innerHTML = ''; // Clear existing confetti
             
-            for (let i = 0; i < 10; i++) {
+            // Create 30 confetti pieces with different shapes
+            for (let i = 0; i < 30; i++) {
                 const confetti = document.createElement('div');
-                confetti.className = 'confetti';
+                
+                // Randomly assign shapes
+                const shapes = ['', 'square', 'circle', 'triangle'];
+                const randomShape = shapes[Math.floor(Math.random() * shapes.length)];
+                
+                confetti.className = `confetti ${randomShape}`;
                 container.appendChild(confetti);
             }
             
             // Remove confetti after animation completes
             setTimeout(() => {
                 container.innerHTML = '';
-            }, 3000);
+            }, 4000);
         }
 
         // Check if tier 4 and trigger confetti
