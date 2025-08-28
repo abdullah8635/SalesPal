@@ -282,7 +282,7 @@ def ratelimit_handler(e):
     return jsonify(error="Rate limit exceeded. Please try again later."), 429
 
 class User(UserMixin):
-    def __init__(self, id, name, is_admin):
+    def __init__(self, id, name, is_admin, username=None):
         self.id = str(id)
         self.name = name
         self.is_admin = is_admin
