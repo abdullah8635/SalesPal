@@ -172,11 +172,17 @@
         }
 
         .tier-markers {
-            display: flex;
-            justify-content: space-between;
-            padding: 0 10px;
+            position: relative;
+            height: 20px;
+            margin: 0 10px;
+        }
+        
+        .tier-markers span {
+            position: absolute;
+            transform: translateX(-50%);
             color: #666;
             font-size: 0.9rem;
+            white-space: nowrap;
         }
 
         .tier-info {
@@ -205,9 +211,16 @@
 
         .pay-period-header h2 {
             margin: 0;
-            color: rgb(67, 177, 43);
-            font-size: 1.3rem;
+            color: rgb(38, 156, 224);
+            font-size: 1.1rem;
             font-weight: 600;
+        }
+
+        .pay-period-date {
+            color: #2d7a1a;
+            font-size: 1.5rem;
+            font-weight: 700;
+            margin: 0.5rem 0;
         }
 
         .current-period-badge {
@@ -352,6 +365,177 @@
                 font-size: 0.9rem;
             }
         }
+
+        /* Confetti Animation */
+        .confetti {
+            position: fixed;
+            width: 12px;
+            height: 12px;
+            background-color: #f0f;
+            animation: confetti-fall 4s linear infinite;
+            z-index: 9999;
+            border-radius: 2px;
+        }
+
+        .confetti.square {
+            border-radius: 0;
+        }
+
+        .confetti.circle {
+            border-radius: 50%;
+        }
+
+        .confetti.triangle {
+            width: 0;
+            height: 0;
+            background-color: transparent;
+            border-left: 6px solid transparent;
+            border-right: 6px solid transparent;
+            border-bottom: 12px solid;
+        }
+
+        @keyframes confetti-fall {
+            0% {
+                transform: translateY(-100vh) rotate(0deg) scale(1);
+                opacity: 1;
+            }
+            50% {
+                opacity: 1;
+            }
+            100% {
+                transform: translateY(100vh) rotate(1440deg) scale(0.5);
+                opacity: 0;
+            }
+        }
+
+        /* More confetti pieces with different shapes and colors */
+        .confetti:nth-child(1) { background-color: #ff0000; left: 5%; animation-delay: 0s; }
+        .confetti:nth-child(2) { background-color: #00ff00; left: 10%; animation-delay: 0.1s; }
+        .confetti:nth-child(3) { background-color: #0000ff; left: 15%; animation-delay: 0.2s; }
+        .confetti:nth-child(4) { background-color: #ffff00; left: 20%; animation-delay: 0.3s; }
+        .confetti:nth-child(5) { background-color: #ff00ff; left: 25%; animation-delay: 0.4s; }
+        .confetti:nth-child(6) { background-color: #00ffff; left: 30%; animation-delay: 0.5s; }
+        .confetti:nth-child(7) { background-color: #ff8800; left: 35%; animation-delay: 0.6s; }
+        .confetti:nth-child(8) { background-color: #8800ff; left: 40%; animation-delay: 0.7s; }
+        .confetti:nth-child(9) { background-color: #ff0088; left: 45%; animation-delay: 0.8s; }
+        .confetti:nth-child(10) { background-color: #88ff00; left: 50%; animation-delay: 0.9s; }
+        .confetti:nth-child(11) { background-color: #ff4444; left: 55%; animation-delay: 1.0s; }
+        .confetti:nth-child(12) { background-color: #44ff44; left: 60%; animation-delay: 1.1s; }
+        .confetti:nth-child(13) { background-color: #4444ff; left: 65%; animation-delay: 1.2s; }
+        .confetti:nth-child(14) { background-color: #ffff44; left: 70%; animation-delay: 1.3s; }
+        .confetti:nth-child(15) { background-color: #ff44ff; left: 75%; animation-delay: 1.4s; }
+        .confetti:nth-child(16) { background-color: #44ffff; left: 80%; animation-delay: 1.5s; }
+        .confetti:nth-child(17) { background-color: #ff8844; left: 85%; animation-delay: 1.6s; }
+        .confetti:nth-child(18) { background-color: #8844ff; left: 90%; animation-delay: 1.7s; }
+        .confetti:nth-child(19) { background-color: #ff4488; left: 95%; animation-delay: 1.8s; }
+        .confetti:nth-child(20) { background-color: #88ff44; left: 98%; animation-delay: 1.9s; }
+        .confetti:nth-child(21) { background-color: #ffaa00; left: 3%; animation-delay: 2.0s; }
+        .confetti:nth-child(22) { background-color: #aa00ff; left: 8%; animation-delay: 2.1s; }
+        .confetti:nth-child(23) { background-color: #00ffaa; left: 13%; animation-delay: 2.2s; }
+        .confetti:nth-child(24) { background-color: #ff00aa; left: 18%; animation-delay: 2.3s; }
+        .confetti:nth-child(25) { background-color: #00aaff; left: 23%; animation-delay: 2.4s; }
+        .confetti:nth-child(26) { background-color: #aaff00; left: 28%; animation-delay: 2.5s; }
+        .confetti:nth-child(27) { background-color: #ffaa44; left: 33%; animation-delay: 2.6s; }
+        .confetti:nth-child(28) { background-color: #aa44ff; left: 38%; animation-delay: 2.7s; }
+        .confetti:nth-child(29) { background-color: #44ffaa; left: 43%; animation-delay: 2.8s; }
+        .confetti:nth-child(30) { background-color: #ff44aa; left: 48%; animation-delay: 2.9s; }
+        
+        /* Commission Summary Styles */
+        .commission-summary {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 12px;
+            border: 1px solid #dee2e6;
+        }
+        
+        .commission-summary h3 {
+            text-align: center;
+            margin-bottom: 1.5rem;
+            color: rgb(67, 177, 43);
+            font-size: 1.3rem;
+        }
+        
+        .commission-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+        
+        .commission-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem;
+            background: white;
+            border-radius: 8px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .commission-item .label {
+            font-weight: 500;
+            color: #666;
+        }
+        
+        .commission-item .value {
+            font-weight: 700;
+            color: rgb(38, 156, 224);
+            font-size: 1.1rem;
+        }
+        
+        .requirements-status {
+            border-top: 1px solid #dee2e6;
+            padding-top: 1.5rem;
+        }
+        
+        .requirements-status h4 {
+            text-align: center;
+            margin-bottom: 1rem;
+            color: #666;
+            font-size: 1.1rem;
+        }
+        
+        .requirement-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem;
+            margin-bottom: 0.5rem;
+            background: white;
+            border-radius: 6px;
+            border: 1px solid #e0e0e0;
+        }
+        
+        .requirement-label {
+            font-weight: 500;
+            color: #666;
+        }
+        
+        .status {
+            font-weight: 600;
+            padding: 0.25rem 0.75rem;
+            border-radius: 20px;
+            font-size: 0.9rem;
+        }
+        
+        .status.pending {
+            background: #fff3cd;
+            color: #856404;
+            border: 1px solid #ffeaa7;
+        }
+        
+        .status.met {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        
+        .status.not-met {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
     </style>
 </head>
 <body>
@@ -371,7 +555,8 @@
             <!-- Pay Period Navigation -->
             <div class="pay-period-container">
                 <div class="pay-period-header">
-                    <h2>Pay Period: {{ period_display }}</h2>
+                    <h2>Pay Period:</h2>
+                    <div class="pay-period-date">{{ period_display }}</div>
                     {% if is_current_period %}
                     <span class="current-period-badge">Current Period</span>
                     {% endif %}
@@ -395,6 +580,15 @@
                         <th>Total Devices</th>
                         <th>Accessories</th>
                         <th>Current Tier</th>
+                        <th>Total Commission</th>
+                        <th>Activation</th>
+                        <th>Upgrade</th>
+                        <th>Protection</th>
+                        <th>Accessory</th>
+                        <th>APO</th>
+                        <th>Accessory Rate</th>
+                        <th>AutoPay %</th>
+                        <th>Cricket Protect %</th>
                     </tr>
                     {% for row in commission_data %}
                     <tr>
@@ -405,6 +599,15 @@
                         <td>{{ row[4] }}</td>
                         <td>${{ "%.2f"|format(row[5]) }}</td>
                         <td>{{ row[6] }}</td>
+                        <td>${{ "%.2f"|format(row[7]) }}</td>
+                        <td>${{ "%.2f"|format(row[8]) }}</td>
+                        <td>${{ "%.2f"|format(row[9]) }}</td>
+                        <td>${{ "%.2f"|format(row[10]) }}</td>
+                        <td>${{ "%.2f"|format(row[11]) }}</td>
+                        <td>${{ "%.2f"|format(row[12]) }}</td>
+                        <td>{{ "%.1f"|format(row[13]) }}%</td>
+                        <td>{{ "%.1f"|format(row[14]) }}%</td>
+                        <td>{{ "%.1f"|format(row[15]) }}%</td>
                     </tr>
                     {% endfor %}
                 </table>
@@ -417,18 +620,68 @@
                     <div class="progress-bar" style="width: {{ progress }}%"></div>
                 </div>
                 <div class="tier-markers">
-                    <span>$0</span>
-                    <span>$500</span>
-                    <span>$750</span>
-                    <span>$1000</span>
-                    <span>$1750</span>
+                    <span style="left: 0%">$0</span>
+                    <span style="left: 20%">$500</span>
+                    <span style="left: 30%">$750</span>
+                    <span style="left: 40%">$1000</span>
+                    <span style="left: 100%">$1750</span>
                 </div>
                 <div class="tier-info">
                     Current Tier: {{ current_tier }}
                     {% if current_tier == 4 %}
                     <br>Maximum tier achieved! 🎯
+                    {% elif current_tier == 0 %}
+                    <br>No commission for this tier
                     {% endif %}
                     <br><small>Pay Period: {{ period_display }}</small>
+                </div>
+            </div>
+            
+            <!-- Commission Summary -->
+            <div class="commission-summary">
+                <h3>Commission Summary</h3>
+                <div class="commission-grid">
+                    <div class="commission-item">
+                        <span class="label">Total Commission:</span>
+                        <span class="value">${{ "%.2f"|format(commission_data[0][7]) }}</span>
+                    </div>
+                    <div class="commission-item">
+                        <span class="label">Activation:</span>
+                        <span class="value">${{ "%.2f"|format(commission_data[0][8]) }}</span>
+                    </div>
+                    <div class="commission-item">
+                        <span class="label">Upgrade:</span>
+                        <span class="value">${{ "%.2f"|format(commission_data[0][9]) }}</span>
+                    </div>
+                    <div class="commission-item">
+                        <span class="label">Protection:</span>
+                        <span class="value">${{ "%.2f"|format(commission_data[0][10]) }}</span>
+                    </div>
+                    <div class="commission-item">
+                        <span class="label">Accessory:</span>
+                        <span class="value">${{ "%.2f"|format(commission_data[0][11]) }}</span>
+                    </div>
+                    <div class="commission-item">
+                        <span class="label">APO:</span>
+                        <span class="value">${{ "%.2f"|format(commission_data[0][12]) }}</span>
+                    </div>
+                    <div class="commission-item">
+                        <span class="label">Accessory Rate:</span>
+                        <span class="value">{{ "%.1f"|format(commission_data[0][13]) }}%</span>
+                    </div>
+                </div>
+                
+                <!-- Requirements Status -->
+                <div class="requirements-status">
+                    <h4>Requirements Status</h4>
+                    <div class="requirement-item">
+                        <span class="requirement-label">Protection (CP):</span>
+                        <span class="status pending">⚠️ Not yet calculated</span>
+                    </div>
+                    <div class="requirement-item">
+                        <span class="requirement-label">Autopay (AP):</span>
+                        <span class="status pending">⚠️ Not yet calculated</span>
+                    </div>
                 </div>
             </div>
             {% endif %}
@@ -443,5 +696,41 @@
             </div>
         </div>
     </main>
+
+    <!-- Confetti Container -->
+    <div id="confetti-container"></div>
+
+    <script>
+        // Confetti function
+        function createConfetti() {
+            const container = document.getElementById('confetti-container');
+            container.innerHTML = ''; // Clear existing confetti
+            
+            // Create 30 confetti pieces with different shapes
+            for (let i = 0; i < 30; i++) {
+                const confetti = document.createElement('div');
+                
+                // Randomly assign shapes
+                const shapes = ['', 'square', 'circle', 'triangle'];
+                const randomShape = shapes[Math.floor(Math.random() * shapes.length)];
+                
+                confetti.className = `confetti ${randomShape}`;
+                container.appendChild(confetti);
+            }
+            
+            // Remove confetti after animation completes
+            setTimeout(() => {
+                container.innerHTML = '';
+            }, 4000);
+        }
+
+        // Check if tier 4 and trigger confetti
+        {% if not is_admin and current_tier == 4 %}
+        // Wait for page to load, then trigger confetti
+        window.addEventListener('load', function() {
+            setTimeout(createConfetti, 500); // Small delay for dramatic effect
+        });
+        {% endif %}
+    </script>
 </body>
 </html>

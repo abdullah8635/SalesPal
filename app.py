@@ -68,18 +68,35 @@ def get_pay_period_by_number(period_number):
 def format_pay_period_display(start_date, end_date):
     """Format pay period dates for display"""
     return f"{start_date.strftime('%B %d, %Y')} - {end_date.strftime('%B %d, %Y')}"
-
+    
 def parse_order_date(order_date_str):
-    """Parse order date string from format like '28-Aug-2024' to datetime"""
+    """Parse order date string from various formats to datetime"""
     try:
         if not order_date_str or order_date_str == 'N/A':
             return None
         
-        # Handle format like "28-Aug-2024" or "28-Aug-2024 10:30 AM"
-        date_part = order_date_str.split(' ')[0]  # Take only the date part
-        return datetime.strptime(date_part, '%d-%b-%Y')
-    except ValueError:
-        app.logger.warning(f"Could not parse order date: {order_date_str}")
+        date_part = order_date_str.split(' ')[0]
+        
+        formats_to_try = [
+            '%d-%b-%Y',    # 28-Aug-2025
+            '%d-%B-%Y',    # 21-august-2025  ← ADD THIS LINE
+            '%m-%d-%Y',    # 8-28-2025
+            '%Y-%m-%d',    # 2025-08-28
+            '%m/%d/%Y',    # 8/28/2025
+            '%d/%m/%Y',    # 28/8/2025
+        ]
+        
+        for fmt in formats_to_try:
+            try:
+                return datetime.strptime(date_part, fmt)
+            except ValueError:
+                continue
+        
+        #app.logger.warning(f"Could not parse order date with any format: {order_date_str}")
+        return None
+        
+    except Exception as e:
+        #app.logger.warning(f"Error parsing order date '{order_date_str}': {str(e)}")
         return None
 
 def is_date_in_pay_period(order_date_str, period_start, period_end):
@@ -89,6 +106,85 @@ def is_date_in_pay_period(order_date_str, period_start, period_end):
         return False
     
     return period_start <= order_date <= period_end
+
+def detect_plan_type(pdf_text):
+    """Detect plan type from PDF text based on Smart Touch Wireless patterns"""
+    pdf_text_upper = pdf_text.upper()
+    
+    # Count occurrences of each plan type
+    plan_counts = {
+        "60": 0,
+        "55": 0,
+        "30/40": 0
+    }
+    
+    # 60 plans - count all occurrences
+    plan_counts["60"] = pdf_text_upper.count("60UNLPP1")
+    
+    # 55 plans - count all occurrences of both patterns
+    plan_counts["55"] = pdf_text_upper.count("55UNLPP1") + pdf_text_upper.count("40UNLPP1")
+    
+    # 30/40 plans - count all occurrences
+    plan_counts["30/40"] = pdf_text_upper.count("SELECT 10GB") + pdf_text_upper.count("30SELECTPP1")
+    
+    return plan_counts
+
+def calculate_commission(activations_by_plan, upgrades, protection_added, accessories_total, tier, total_devices):
+    """Calculate commission based on Smart Touch Wireless commission structure"""
+    
+    # 1. Plan-based activation commissions
+    activation_commission = 0.0
+    for plan_type, count in activations_by_plan.items():
+        if plan_type == "60":
+            rates = {0: 0.00, 1: 4.00, 2: 6.00, 3: 10.00, 4: 15.00}
+        elif plan_type == "55":
+            rates = {0: 0.00, 1: 2.00, 2: 5.00, 3: 7.00, 4: 10.00}
+        elif plan_type == "30/40":
+            rates = {0: 0.00, 1: 1.00, 2: 1.00, 3: 1.00, 4: 1.00}
+        else:
+            continue
+            
+        activation_commission += count * rates.get(tier, 0.0)
+    
+    # 2. Upgrade commissions
+    upgrade_rates = {1: 3.00, 2: 5.00, 3: 7.00, 4: 10.00}
+    upgrade_commission = upgrades * upgrade_rates.get(tier, 0.0)
+    
+    # 3. Protection (CP) commissions
+    protection_rates = {1: 0.50, 2: 0.75, 3: 1.00, 4: 2.00}
+    protection_commission = protection_added * protection_rates.get(tier, 0.0)
+    
+    # 4. Accessory commissions
+    base_accessory_rate = 0.10  # 10%
+    
+    # Calculate APO (Accessory Per Opportunity)
+    apo = accessories_total / total_devices if total_devices > 0 else 0
+    
+    # APO bonus rates
+    apo_bonus_rates = {1: 0.005, 2: 0.01, 3: 0.025, 4: 0.05}  # 0.5%, 1%, 2.5%, 5%
+    
+    if apo >= 60:
+        total_accessory_rate = base_accessory_rate + apo_bonus_rates.get(tier, 0.0)
+    else:
+        total_accessory_rate = base_accessory_rate
+    
+    accessory_commission = accessories_total * total_accessory_rate
+    
+    # Total commission
+    total_commission = activation_commission + upgrade_commission + protection_commission + accessory_commission
+    
+    return {
+        'total': round(total_commission, 2),
+        'breakdown': {
+            'activation': round(activation_commission, 2),
+            'upgrade': round(upgrade_commission, 2),
+            'protection': round(protection_commission, 2),
+            'accessory': round(accessory_commission, 2),
+            'apo': round(apo, 2),
+            'accessory_rate': round(total_accessory_rate * 100, 1)
+        }
+    }
+
 
 app = Flask(__name__)
 login_manager = LoginManager(app)
@@ -111,7 +207,8 @@ app.config.update(
     DB_HOST='localhost',
     DB_NAME='salespal',
     DB_USER='yourusername',
-    DB_PASSWORD='yourpassword'
+    DB_PASSWORD='yourpassword',
+    DB_PORT='5432'
 )
 
 # SINGLE DATABASE POOL CONFIGURATION
@@ -229,14 +326,6 @@ def check_db_health():
         app.logger.error(f"Database health check failed: {str(e)}")
         return False
 
-# Initialize database pool on app startup
-with app.app_context():
-    try:
-        initialize_db_pool()
-    except Exception as e:
-        app.logger.error(f"Failed to initialize database pool on startup: {str(e)}")
-        sys.exit(1)
-
 bcrypt = Bcrypt(app)
 limiter = Limiter(
     app=app,
@@ -282,10 +371,11 @@ def ratelimit_handler(e):
     return jsonify(error="Rate limit exceeded. Please try again later."), 429
 
 class User(UserMixin):
-    def __init__(self, id, name, is_admin):
+    def __init__(self, id, name, is_admin, username=None):
         self.id = str(id)
         self.name = name
         self.is_admin = is_admin
+        self.username = username
 
     def get_id(self):
         return self.id
@@ -331,6 +421,8 @@ def init_db():
                         user_id INTEGER,
                         date_submitted TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                         imei_iccid_pairs TEXT,
+                        plan_counts TEXT,
+                        protection_count INTEGER,
                         FOREIGN KEY(user_id) REFERENCES users(id)
                     );
                 ''')
@@ -371,13 +463,14 @@ def load_user(user_id):
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute("SELECT id, name, is_admin FROM users WHERE id = %s", (user_id,))
+                cursor.execute("SELECT id, name, is_admin, username FROM users WHERE id = %s", (user_id,))
                 user_data = cursor.fetchone()
                 if user_data:
                     return User(
                         id=user_data[0],
                         name=user_data[1],
-                        is_admin=user_data[2] == 1
+                        is_admin=user_data[2] == 1,
+                        username=user_data[3]  # Add this line
                     )
         return None
     except Exception as e:
@@ -760,7 +853,8 @@ def login():
                                 user = User(
                                     id=user_id,
                                     name=name,
-                                    is_admin=is_admin == 1
+                                    is_admin=is_admin == 1,
+                                    username=db_username
                                 )
                                 
                                 login_user(user, remember=False)
@@ -1415,6 +1509,13 @@ def extract_info_from_pdf(file_stream):
             total_price = 0.0
             accessory_prices_list = []
 
+        plan_counts = detect_plan_type(pdf_text)
+        app.logger.debug(f"Detected plan counts: {plan_counts}")
+        
+        # Detect protection (CP)
+        protection_count = pdf_text.upper().count("PRTLW")
+        app.logger.debug(f"Detected protection count: {protection_count}")
+
         # Validation
         required_fields = [company_name, customer, order_date, sales_person, rq_invoice]
         missing_fields = []
@@ -1446,7 +1547,9 @@ def extract_info_from_pdf(file_stream):
             activations_count,
             ppp_present,
             pairs,
-            activation_fee_sum
+            activation_fee_sum,
+            plan_counts,
+            protection_count
         ]
 
     except Exception as e:
@@ -1658,7 +1761,7 @@ def upload_pdf():
                     parsed = extract_info_from_pdf(io.BytesIO(content))
                     (company_name, customer, order_date, sales_person, rq_invoice,
                      total_price, accessories_prices, upgrades_count, activations_count,
-                     ppp_present, pairs, activation_fee_sum) = parsed
+                     ppp_present, pairs, activation_fee_sum, plan_counts, protection_count) = parsed
 
                     required = [company_name, customer, order_date, sales_person, rq_invoice]
                     if not all(required):
@@ -1682,7 +1785,9 @@ def upload_pdf():
                         'activation_fee_sum': activation_fee_sum,
                         'activation_fee_details': activation_fee_details,
                         'imei_iccid_pairs': pairs,
-                        'pdf_text': text
+                        'pdf_text': text,
+                        'plan_counts': plan_counts,
+                        'protection_count': protection_count
                     })
 
                 else:
@@ -1736,6 +1841,18 @@ def confirm_receipt():
                 logged_in_user = user[0] if user else 'User'
 
         if request.method == 'POST':
+            # Collect AutoPay and Cricket Protect data
+            autopay_status = request.form.get('autopay_status', 'no')
+            
+            # Collect Cricket Protect data for each device
+            cricket_protect_data = {}
+            imei_iccid_pairs = current_pdf.get('imei_iccid_pairs', [])
+            for i, pair in enumerate(imei_iccid_pairs, 1):
+                cricket_protect_data[f'device_{i}'] = {
+                    'imei': pair.get('imei', ''),
+                    'status': request.form.get(f'cricket_protect_{i}', 'no')
+                }
+            
             form_data = {
                 'company_name': request.form.get('company_name', 'N/A'),
                 'customer': request.form.get('customer', 'N/A'),
@@ -1747,7 +1864,11 @@ def confirm_receipt():
                 'upgrades_count': int(request.form.get('upgrades_count', 0)),
                 'activations_count': int(request.form.get('activations_count', 0)),
                 'ppp_present': 'ppp_present' in request.form,
-                'activation_fee_sum': float(request.form.get('activation_fee_sum', 0))
+                'activation_fee_sum': float(request.form.get('activation_fee_sum', 0)),
+                'plan_counts': current_pdf.get('plan_counts', {}),
+                'protection_count': current_pdf.get('protection_count', 0),
+                'autopay_status': autopay_status,
+                'cricket_protect_data': cricket_protect_data
             }
 
             imei_iccid_pairs = current_pdf.get('imei_iccid_pairs', [])
@@ -1756,19 +1877,22 @@ def confirm_receipt():
             try:
                 with get_db_connection() as conn:
                     with conn.cursor() as cursor:
-                        cursor.execute('''
-                            INSERT INTO parsed_receipts (
-                                company_name, customer, order_date, sales_person, rq_invoice,
-                                total_price, accessory_prices, upgrades_count, activations_count,
-                                ppp_present, activation_fee_sum, user_id, imei_iccid_pairs
-                            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                        ''', (
-                            form_data['company_name'], form_data['customer'], form_data['order_date'],
-                            form_data['sales_person'], form_data['rq_invoice'], form_data['total_price'],
-                            form_data['accessories_prices'], form_data['upgrades_count'],
-                            form_data['activations_count'], form_data['ppp_present'],
-                            form_data['activation_fee_sum'], current_user.id, imei_iccid_json
-                        ))
+                                                 cursor.execute('''
+                             INSERT INTO parsed_receipts (
+                                 company_name, customer, order_date, sales_person, rq_invoice,
+                                 total_price, accessory_prices, upgrades_count, activations_count,
+                                 ppp_present, activation_fee_sum, user_id, imei_iccid_pairs,
+                                 plan_counts, protection_count, autopay_status, cricket_protect_data
+                             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                         ''', (
+                             form_data['company_name'], form_data['customer'], form_data['order_date'],
+                             form_data['sales_person'], form_data['rq_invoice'], form_data['total_price'],
+                             form_data['accessories_prices'], form_data['upgrades_count'],
+                             form_data['activations_count'], form_data['ppp_present'],
+                             form_data['activation_fee_sum'], current_user.id, imei_iccid_json,
+                             json.dumps(form_data['plan_counts']), form_data['protection_count'],
+                             form_data['autopay_status'], json.dumps(form_data['cricket_protect_data'])
+                         ))
                     conn.commit()
                     app.logger.info(f"Inserted data for {form_data['company_name']} by {logged_in_user}")
             except Exception as e:
@@ -1806,6 +1930,7 @@ def confirm_receipt():
     except Exception as e:
         app.logger.error(f"Unexpected error in confirm_receipt: {str(e)}")
         return jsonify({'error': 'Unexpected error occurred'}), 500
+
 
 @app.route('/view_receipts')
 @login_required
@@ -1903,7 +2028,10 @@ def receipt_details(rq_invoice):
 def commission(period_offset=0):
     try:
         # Calculate the target pay period
-        current_start, current_end, current_period_number = get_current_pay_period()
+        # Use a reference date to determine the base pay period
+        # For now, use current date, but this could be made configurable
+        reference_date = datetime.now()
+        current_start, current_end, current_period_number = get_current_pay_period(reference_date)
         target_period_number = current_period_number + period_offset
         
         # Don't allow negative period numbers
@@ -1954,7 +2082,7 @@ def commission(period_offset=0):
                             user_data[username][4] += (activations or 0) + (upgrades or 0)  # total devices
                             user_data[username][5] += total_price or 0.0  # accessories
                     
-                    # Calculate tiers
+                    # Calculate tiers and commissions
                     commission_data = []
                     for username, data in user_data.items():
                         accessories_total = data[5]
@@ -1967,8 +2095,56 @@ def commission(period_offset=0):
                         elif accessories_total >= 500:
                             tier = 1
                         else:
-                            tier = 1
+                            tier = 0
                         data[6] = tier
+                        
+                        # Get plan counts and protection data from receipts
+                        plan_counts_total = {"60": 0, "55": 0, "30/40": 0}
+                        protection_total = 0
+                        
+                        # Query receipts for this user in this pay period
+                        cursor.execute('''
+                            SELECT plan_counts, protection_count 
+                            FROM parsed_receipts 
+                            WHERE user_id = (SELECT id FROM users WHERE username = %s)
+                            AND order_date IS NOT NULL
+                        ''', (username,))
+                        
+                        receipt_data = cursor.fetchall()
+                        for receipt in receipt_data:
+                            if receipt[0]:  # plan_counts
+                                try:
+                                    plan_data = json.loads(receipt[0])
+                                    for plan_type, count in plan_data.items():
+                                        if plan_type in plan_counts_total:
+                                            plan_counts_total[plan_type] += count
+                                except:
+                                    pass
+                            
+                            if receipt[1]:  # protection_count
+                                protection_total += receipt[1]
+                        
+                        # Calculate commission
+                        commission_result = calculate_commission(
+                            activations_by_plan=plan_counts_total,
+                            upgrades=data[3],
+                            protection_added=protection_total,
+                            accessories_total=accessories_total,
+                            tier=tier,
+                            total_devices=data[4]
+                        )
+                        
+                        # Add commission data to the row
+                        data.extend([
+                            commission_result['total'],
+                            commission_result['breakdown']['activation'],
+                            commission_result['breakdown']['upgrade'],
+                            commission_result['breakdown']['protection'],
+                            commission_result['breakdown']['accessory'],
+                            commission_result['breakdown']['apo'],
+                            commission_result['breakdown']['accessory_rate']
+                        ])
+                        
                         commission_data.append(data)
                     
                     return render_template('commission.html', 
@@ -2020,10 +2196,57 @@ def commission(period_offset=0):
                     elif total_accessories >= 500:
                         current_tier = 1
                     else:
-                        current_tier = 1
+                        current_tier = 0
                     
                     total_devices = total_activations + total_upgrades
-                    commission_data = [[username, name, total_activations, total_upgrades, total_devices, total_accessories, current_tier]]
+                    
+                    # Get plan counts and protection data from receipts
+                    plan_counts_total = {"60": 0, "55": 0, "30/40": 0}
+                    protection_total = 0
+                    
+                    # Query receipts for this user in this pay period
+                    cursor.execute('''
+                        SELECT plan_counts, protection_count 
+                        FROM parsed_receipts 
+                        WHERE user_id = %s
+                        AND order_date IS NOT NULL
+                    ''', (current_user.id,))
+                    
+                    receipt_data = cursor.fetchall()
+                    for receipt in receipt_data:
+                        if receipt[0]:  # plan_counts
+                            try:
+                                plan_data = json.loads(receipt[0])
+                                for plan_type, count in plan_data.items():
+                                    if plan_type in plan_counts_total:
+                                        plan_counts_total[plan_type] += count
+                            except:
+                                pass
+                        
+                        if receipt[1]:  # protection_count
+                            protection_total += receipt[1]
+                    
+                    # Calculate commission
+                    commission_result = calculate_commission(
+                        activations_by_plan=plan_counts_total,
+                        upgrades=total_upgrades,
+                        protection_added=protection_total,
+                        accessories_total=total_accessories,
+                        tier=current_tier,
+                        total_devices=total_devices
+                    )
+                    
+                    commission_data = [[
+                        username, name, total_activations, total_upgrades, total_devices, 
+                        total_accessories, current_tier,
+                        commission_result['total'],
+                        commission_result['breakdown']['activation'],
+                        commission_result['breakdown']['upgrade'],
+                        commission_result['breakdown']['protection'],
+                        commission_result['breakdown']['accessory'],
+                        commission_result['breakdown']['apo'],
+                        commission_result['breakdown']['accessory_rate']
+                    ]]
                     
                     progress = min((float(total_accessories) / 1750 * 100), 100)
                     
@@ -2057,15 +2280,25 @@ def initialize_database():
         app.logger.error(f"Critical error during database initialization: {str(e)}")
         sys.exit(1)
 
-# Call this function when the app starts
-with app.app_context():
-    if init_db():
-        app.logger.info("Database initialized successfully")
-    else:
-        app.logger.error("Failed to initialize database")
-
 if __name__ == '__main__':
     import sys
+    
+    # Initialize database and database pool when starting the app
+    with app.app_context():
+        try:
+            # Initialize database pool first
+            initialize_db_pool()
+            app.logger.info("Database pool initialized successfully")
+            
+            # Then initialize database tables
+            if init_db():
+                app.logger.info("Database initialized successfully")
+            else:
+                app.logger.error("Failed to initialize database")
+                
+        except Exception as e:
+            app.logger.error(f"Failed to initialize database components: {str(e)}")
+            sys.exit(1)
     
     port = int(os.environ.get('PORT', 5000))
     
