@@ -304,6 +304,78 @@
             color: #28a745;
             font-size: 14px;
         }
+        /* AutoPay and Cricket Protect Styles */
+        .autopay-options, .cricket-protect-options {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+            margin-top: 10px;
+        }
+
+        .option-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px;
+            background: #f8f9fa;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            transition: all 0.3s ease;
+        }
+
+        .option-group:hover {
+            background: #e9ecef;
+            border-color: #43B02A;
+        }
+
+        .option-group input[type="radio"] {
+            width: 18px;
+            height: 18px;
+            margin: 0;
+        }
+
+        .option-group input[type="radio"]:checked + label {
+            color: #43B02A;
+            font-weight: 600;
+        }
+
+        .option-group input[type="radio"]:checked {
+            accent-color: #43B02A;
+        }
+
+        .device-protect-group {
+            background: white;
+            border: 1px solid #dee2e6;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 15px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.05);
+            transition: all 0.3s ease;
+        }
+
+        .device-protect-group:hover {
+            box-shadow: 0 4px 16px rgba(0,0,0,0.1);
+            transform: translateY(-2px);
+        }
+
+        .device-info {
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #e9ecef;
+            color: #495057;
+            font-size: 14px;
+        }
+
+        .protect-options {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .protect-options .option-group {
+            margin: 0;
+            padding: 10px;
+        }
 
         .link-bar {
             margin-top: 2rem;
@@ -515,6 +587,60 @@
                     </div>
                 </div>
             </div>
+            <!-- AutoPay Confirmation Section -->
+            <div class="section-container">
+                <div class="section-title">AutoPay Confirmation</div>
+                <div class="field-group">
+                    <label>Did the employee add AutoPay to the account?</label>
+                    <div class="autopay-options">
+                        <div class="option-group">
+                            <input type="radio" id="autopay_yes" name="autopay_status" value="yes" required>
+                            <label for="autopay_yes">Yes - Added AutoPay</label>
+                        </div>
+                        <div class="option-group">
+                            <input type="radio" id="autopay_no" name="autopay_status" value="no" required>
+                            <label for="autopay_no">No - Did not add AutoPay</label>
+                        </div>
+                        <div class="option-group">
+                            <input type="radio" id="autopay_existing" name="autopay_status" value="existing" required>
+                            <label for="autopay_existing">They already had AutoPay</label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Cricket Protect Confirmation Section -->
+            {% if imei_iccid_pairs %}
+            <div class="section-container">
+                <div class="section-title">Cricket Protect Confirmation</div>
+                <div class="field-group">
+                    <label>For each device, did the employee add Cricket Protect?</label>
+                    <div class="cricket-protect-options">
+                        {% for pair in imei_iccid_pairs %}
+                        <div class="device-protect-group">
+                            <div class="device-info">
+                                <strong>Device {{ loop.index }}:</strong> IMEI {{ pair.imei }}
+                            </div>
+                            <div class="protect-options">
+                                <div class="option-group">
+                                    <input type="radio" id="protect_yes_{{ loop.index }}" name="cricket_protect_{{ loop.index }}" value="yes" required>
+                                    <label for="protect_yes_{{ loop.index }}">Yes - Added Cricket Protect</label>
+                                </div>
+                                <div class="option-group">
+                                    <input type="radio" id="protect_no_{{ loop.index }}" name="cricket_protect_{{ loop.index }}" value="no" required>
+                                    <label for="protect_no_{{ loop.index }}">No - Did not add Cricket Protect</label>
+                                </div>
+                                <div class="option-group">
+                                    <input type="radio" id="protect_existing_{{ loop.index }}" name="cricket_protect_{{ loop.index }}" value="existing" required>
+                                    <label for="protect_existing_{{ loop.index }}">They already had Cricket Protect</label>
+                                </div>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
 
             <button type="submit" class="confirm-btn">Confirm</button>
         </form>
