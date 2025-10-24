@@ -141,11 +141,11 @@ def calculate_commission(activations_by_plan, upgrades, protection_added, access
     activation_commission = 0.0
     for plan_type, count in activations_by_plan.items():
         if plan_type == "60":
-            rates = {1: 4.00, 2: 6.00, 3: 10.00, 4: 15.00}
+            rates = {0: 0.00, 1: 4.00, 2: 6.00, 3: 10.00, 4: 15.00}
         elif plan_type == "55":
-            rates = {1: 2.00, 2: 5.00, 3: 7.00, 4: 10.00}
+            rates = {0: 0.00, 1: 2.00, 2: 5.00, 3: 7.00, 4: 10.00}
         elif plan_type == "30/40":
-            rates = {1: 1.00, 2: 1.00, 3: 1.00, 4: 1.00}
+            rates = {0: 0.00, 1: 1.00, 2: 1.00, 3: 1.00, 4: 1.00}
         else:
             continue
             
@@ -2085,7 +2085,7 @@ def commission(period_offset=0):
                         elif accessories_total >= 500:
                             tier = 1
                         else:
-                            tier = 1
+                            tier = 0
                         data[6] = tier
                         
                         # Get plan counts and protection data from receipts
@@ -2186,7 +2186,7 @@ def commission(period_offset=0):
                     elif total_accessories >= 500:
                         current_tier = 1
                     else:
-                        current_tier = 1
+                        current_tier = 0
                     
                     total_devices = total_activations + total_upgrades
                     
