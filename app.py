@@ -1841,6 +1841,18 @@ def confirm_receipt():
                 logged_in_user = user[0] if user else 'User'
 
         if request.method == 'POST':
+            # Collect AutoPay and Cricket Protect data
+            autopay_status = request.form.get('autopay_status', 'no')
+            
+            # Collect Cricket Protect data for each device
+            cricket_protect_data = {}
+            imei_iccid_pairs = current_pdf.get('imei_iccid_pairs', [])
+            for i, pair in enumerate(imei_iccid_pairs, 1):
+                cricket_protect_data[f'device_{i}'] = {
+                    'imei': pair.get('imei', ''),
+                    'status': request.form.get(f'cricket_protect_{i}', 'no')
+                }
+            
             form_data = {
                 'company_name': request.form.get('company_name', 'N/A'),
                 'customer': request.form.get('customer', 'N/A'),
@@ -1854,7 +1866,9 @@ def confirm_receipt():
                 'ppp_present': 'ppp_present' in request.form,
                 'activation_fee_sum': float(request.form.get('activation_fee_sum', 0)),
                 'plan_counts': current_pdf.get('plan_counts', {}),
-                'protection_count': current_pdf.get('protection_count', 0)
+                'protection_count': current_pdf.get('protection_count', 0),
+                'autopay_status': autopay_status,
+                'cricket_protect_data': cricket_protect_data
             }
 
             imei_iccid_pairs = current_pdf.get('imei_iccid_pairs', [])
@@ -1868,15 +1882,16 @@ def confirm_receipt():
                                  company_name, customer, order_date, sales_person, rq_invoice,
                                  total_price, accessory_prices, upgrades_count, activations_count,
                                  ppp_present, activation_fee_sum, user_id, imei_iccid_pairs,
-                                 plan_counts, protection_count
-                             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                                 plan_counts, protection_count, autopay_status, cricket_protect_data
+                             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                          ''', (
                              form_data['company_name'], form_data['customer'], form_data['order_date'],
                              form_data['sales_person'], form_data['rq_invoice'], form_data['total_price'],
                              form_data['accessories_prices'], form_data['upgrades_count'],
                              form_data['activations_count'], form_data['ppp_present'],
                              form_data['activation_fee_sum'], current_user.id, imei_iccid_json,
-                             json.dumps(form_data['plan_counts']), form_data['protection_count']
+                             json.dumps(form_data['plan_counts']), form_data['protection_count'],
+                             form_data['autopay_status'], json.dumps(form_data['cricket_protect_data'])
                          ))
                     conn.commit()
                     app.logger.info(f"Inserted data for {form_data['company_name']} by {logged_in_user}")
