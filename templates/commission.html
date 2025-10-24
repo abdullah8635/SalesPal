@@ -213,13 +213,14 @@
             margin: 0;
             color: rgb(38, 156, 224);
             font-size: 1.1rem;
-            font-weight: 500;
+            font-weight: 600;
         }
 
         .pay-period-date {
             color: #2d7a1a;
             font-size: 1.5rem;
             font-weight: 700;
+            margin: 0.5rem 0;
         }
 
         .current-period-badge {
@@ -270,7 +271,7 @@
         }
 
         .current-period-btn:hover {
-            background: rgb(38, 156, 224);
+            background: #2d7a1a;
             transform: translateY(-2px);
             box-shadow: 0 4px 8px rgba(67, 177, 43, 0.3);
         }
@@ -365,6 +366,7 @@
             }
         }
 
+        /* Confetti Animation */
         .confetti {
             position: fixed;
             width: 12px;
@@ -542,20 +544,20 @@
             <img src="/static/logo.png" alt="Smart Touch Wireless" class="logo">
         </div>
         <div class="nav-items">
-            <div class="nav-item">Hello, {{ current_user }}</div>
+            <div class="nav-item">Welcome, {{ current_user }}</div>
         </div>
     </nav>
 
     <main class="main-content">
         <div class="commission-container">
-            <h1>{% if is_admin %}Team Performance{% else %}{% endif %}</h1>
+            <h1>{% if is_admin %}Team Performance{% else %}My Commission{% endif %}</h1>
             
             <!-- Pay Period Navigation -->
             <div class="pay-period-container">
                 <div class="pay-period-header">
                     <h2>Pay Period:</h2>
                     <div class="pay-period-date">{{ period_display }}</div>
-                    <h3>{% if is_current_period %}</h3>
+                    {% if is_current_period %}
                     <span class="current-period-badge">Current Period</span>
                     {% endif %}
                 </div>
@@ -584,6 +586,7 @@
                         <th>Protection</th>
                         <th>Accessory</th>
                         <th>APO</th>
+                        <th>Accessory Rate</th>
                     </tr>
                     {% for row in commission_data %}
                     <tr>
@@ -600,6 +603,7 @@
                         <td>${{ "%.2f"|format(row[10]) }}</td>
                         <td>${{ "%.2f"|format(row[11]) }}</td>
                         <td>${{ "%.2f"|format(row[12]) }}</td>
+                        <td>{{ "%.1f"|format(row[13]) }}%</td>
                     </tr>
                     {% endfor %}
                 </table>
@@ -613,19 +617,23 @@
                 </div>
                 <div class="tier-markers">
                     <span style="left: 0%">$0</span>
-                    <span style="left: 28.6%">$500</span>
-                    <span style="left: 42.9%">$750</span>
-                    <span style="left: 57.1%">$1000</span>
+                    <span style="left: 20%">$500</span>
+                    <span style="left: 30%">$750</span>
+                    <span style="left: 40%">$1000</span>
                     <span style="left: 100%">$1750</span>
                 </div>
                 <div class="tier-info">
                     Current Tier: {{ current_tier }}
                     {% if current_tier == 4 %}
                     <br>Maximum tier achieved! 🎯
+                    {% elif current_tier == 0 %}
+                    <br>No commission for this tier
                     {% endif %}
-                    <br>
+                    <br><small>Pay Period: {{ period_display }}</small>
                 </div>
             </div>
+            
+            <!-- Commission Summary -->
             <div class="commission-summary">
                 <h3>Commission Summary</h3>
                 <div class="commission-grid">
@@ -684,6 +692,8 @@
             </div>
         </div>
     </main>
+
+    <!-- Confetti Container -->
     <div id="confetti-container"></div>
 
     <script>
