@@ -118,19 +118,14 @@ def detect_plan_type(pdf_text):
         "30/40": 0
     }
     
-    # 60 plans
-    if "60UNLPP1" in pdf_text_upper:
-        plan_counts["60"] += 1
+    # 60 plans - count all occurrences
+    plan_counts["60"] = pdf_text_upper.count("60UNLPP1")
     
-    # 55 plans
-    if "55UNLPP1" in pdf_text_upper:
-        plan_counts["55"] += 1
-    if "40UNLPP1" in pdf_text_upper:
-        plan_counts["55"] += 1
+    # 55 plans - count all occurrences of both patterns
+    plan_counts["55"] = pdf_text_upper.count("55UNLPP1") + pdf_text_upper.count("40UNLPP1")
     
-    # 30/40 plans
-    if "SELECT 10GB" in pdf_text_upper or "30SELECTPP1" in pdf_text_upper:
-        plan_counts["30/40"] += 1
+    # 30/40 plans - count all occurrences
+    plan_counts["30/40"] = pdf_text_upper.count("SELECT 10GB") + pdf_text_upper.count("30SELECTPP1")
     
     return plan_counts
 
