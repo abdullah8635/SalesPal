@@ -587,6 +587,8 @@
                         <th>Accessory</th>
                         <th>APO</th>
                         <th>Accessory Rate</th>
+                        <th>AutoPay %</th>
+                        <th>Cricket Protect %</th>
                     </tr>
                     {% for row in commission_data %}
                     <tr>
@@ -604,6 +606,8 @@
                         <td>${{ "%.2f"|format(row[11]) }}</td>
                         <td>${{ "%.2f"|format(row[12]) }}</td>
                         <td>{{ "%.1f"|format(row[13]) }}%</td>
+                        <td>{{ "%.1f"|format(row[14]) }}%</td>
+                        <td>{{ "%.1f"|format(row[15]) }}%</td>
                     </tr>
                     {% endfor %}
                 </table>
